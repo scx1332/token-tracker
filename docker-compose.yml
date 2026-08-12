@@ -1,0 +1,79 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-tokens}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-tokens}
+      POSTGRES_DB: ${POSTGRES_DB:-tokens}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  ingest:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        BUILD_COMMIT: ${BUILD_COMMIT:-unknown}
+        BUILD_DATE: ${BUILD_DATE:-unknown}
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-tokens}:${POSTGRES_PASSWORD:-tokens}@postgres:5432/${POSTGRES_DB:-tokens}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      OPENROUTER_BASE_URL: ${OPENROUTER_BASE_URL:-https://openrouter.ai}
+      INGEST_INTERVAL_MS: ${INGEST_INTERVAL_MS:-3600000}
+      INGEST_CONCURRENCY: ${INGEST_CONCURRENCY:-6}
+      INGEST_REQUEST_DELAY_MS: ${INGEST_REQUEST_DELAY_MS:-120}
+      INGEST_FETCH_ENDPOINTS: ${INGEST_FETCH_ENDPOINTS:-true}
+      INGEST_FETCH_USAGE: ${INGEST_FETCH_USAGE:-true}
+      BACKFILL_DAYS: ${BACKFILL_DAYS:-120}
+    command: ["bun", "run", "ingest"]
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        BUILD_COMMIT: ${BUILD_COMMIT:-unknown}
+        BUILD_DATE: ${BUILD_DATE:-unknown}
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-tokens}:${POSTGRES_PASSWORD:-tokens}@postgres:5432/${POSTGRES_DB:-tokens}
+      SERVER_PORT: 3000
+      SERVER_HOSTNAME: 0.0.0.0
+    ports:
+      - "127.0.0.1:${BACKEND_PORT:-28470}:3000"
+    command: ["bun", "run", "serve"]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 6
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      - backend
+    environment:
+      PORT: 23561
+      BACKEND_HOST: backend
+      BACKEND_PORT: 3000
+    ports:
+      - "127.0.0.1:${FRONTEND_PORT:-28471}:23561"
+
+volumes:
+  pgdata:
