@@ -201,12 +201,14 @@ export interface ProviderStat {
   avgUsdPerMtok: number | null;
 }
 
-/** One hourly price band for a GPU on the vast.ai rental market, USD/GPU-hour. */
+/** One sweep's price band for a GPU on the vast.ai rental market, USD/GPU-hour. */
 export interface GpuPriceRow {
   gpuName: string;
   capturedAt: string;
   offers: number;
   gpusAvailable: number;
+  /** Priced listings the practical-price fence excluded as junk. */
+  excludedOffers: number;
   minUsd: number | null;
   p25Usd: number | null;
   medianUsd: number | null;
@@ -219,6 +221,18 @@ export interface GpuPriceRow {
   verifiedGpusAvailable: number;
   verifiedMinUsd: number | null;
   verifiedMedianUsd: number | null;
+}
+
+/** One UTC-day aggregate of a GPU's sweeps (server-side rollup). */
+export interface GpuDailyRow {
+  gpuName: string;
+  date: string;
+  minUsd: number | null;
+  medianUsd: number | null;
+  p25Usd: number | null;
+  p75Usd: number | null;
+  gpusAvailable: number;
+  samples: number;
 }
 
 export type AcceleratorTier = "flagship" | "datacenter" | "prosumer";
@@ -292,4 +306,12 @@ export const api = {
     q.set("days", String(params.days ?? 30));
     return get<{ series: GpuPriceRow[]; accelerators: Accelerator[] }>(`/gpu/series?${q.toString()}`);
   },
+  gpuDaily: (params: { gpu?: string; days?: number } = {}) => {
+    const q = new URLSearchParams();
+    if (params.gpu) q.set("gpu", params.gpu);
+    q.set("days", String(params.days ?? 60));
+    return get<{ daily: GpuDailyRow[]; accelerators: Accelerator[] }>(`/gpu/daily?${q.toString()}`);
+  },
+  /** Hourly market snapshots — the token side's intraday series. */
+  marketSnapshots: (days = 14) => get<{ snapshots: MarketRow[] }>(`/market/snapshots?days=${days}`),
 };

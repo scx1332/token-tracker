@@ -1,9 +1,29 @@
 import { useEffect, useMemo, useState } from "react";
-import { api, type AcceleratorWithLatest, type GpuPriceRow, type PriceIndexPoint } from "../api";
+import {
+  api,
+  type AcceleratorWithLatest,
+  type GpuDailyRow,
+  type GpuPriceRow,
+  type MarketRow,
+  type PriceIndexPoint,
+} from "../api";
 import { Loading, ErrorNote, Panel, Delta, Kpi } from "../components";
-import { GpuBandChart, ComputeVsTokensChart, Sparkline, C } from "../charts";
+import {
+  GpuBandChart,
+  ComputeVsTokensChart,
+  IntradayTapeChart,
+  HourProfileChart,
+  Sparkline,
+  C,
+} from "../charts";
 import { compact } from "../format";
-import { toDailyPoints, groupByGpu, buildComparison, totalChangePct } from "../gpu";
+import {
+  groupDailyByGpu,
+  lastWindow,
+  hourOfDayProfile,
+  buildComparison,
+  totalChangePct,
+} from "../gpu";
 
 const TIER_LABEL: Record<string, string> = {
   flagship: "Flagship",
@@ -21,50 +41,85 @@ function gpuHr(v: number | null | undefined): string {
 
 export function ComputeView({ navigate: _navigate }: { navigate: (to: string) => void }) {
   const [accelerators, setAccelerators] = useState<AcceleratorWithLatest[] | null>(null);
-  const [series, setSeries] = useState<GpuPriceRow[] | null>(null);
+  const [dailyAll, setDailyAll] = useState<GpuDailyRow[] | null>(null);
   const [priceIndex, setPriceIndex] = useState<PriceIndexPoint[] | null>(null);
+  const [snapshots, setSnapshots] = useState<MarketRow[]>([]);
+  const [hourly, setHourly] = useState<GpuPriceRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string>("B200");
   const [metric, setMetric] = useState<"minUsd" | "medianUsd">("medianUsd");
 
   useEffect(() => {
     let alive = true;
-    Promise.all([api.gpu(), api.gpuSeries({ days: 30 }), api.market(120)])
-      .then(([g, s, m]) => {
+    Promise.all([api.gpu(), api.gpuDaily({ days: 30 }), api.market(120)])
+      .then(([g, d, m]) => {
         if (!alive) return;
         setAccelerators(g.accelerators);
-        setSeries(s.series);
+        setDailyAll(d.daily);
         setPriceIndex(m.priceIndex);
       })
       .catch((e) => alive && setError(String(e.message ?? e)));
+    // Hourly token snapshots power the hour-of-day profile; the page must
+    // still render if this secondary fetch fails.
+    api
+      .marketSnapshots(14)
+      .then((s) => alive && setSnapshots(s.snapshots))
+      .catch(() => alive && setSnapshots([]));
     return () => {
       alive = false;
     };
   }, []);
 
-  const byGpu = useMemo(() => groupByGpu(series ?? []), [series]);
+  // The intraday tape and profile follow the selected accelerator.
+  useEffect(() => {
+    let alive = true;
+    setHourly(null);
+    api
+      .gpuSeries({ gpu: selected, days: 14 })
+      .then((s) => alive && setHourly(s.series))
+      .catch(() => alive && setHourly([]));
+    return () => {
+      alive = false;
+    };
+  }, [selected]);
 
-  const dailyBySelected = useMemo(
-    () => toDailyPoints(byGpu.get(selected) ?? []),
-    [byGpu, selected],
-  );
+  const dailyByGpu = useMemo(() => groupDailyByGpu(dailyAll ?? []), [dailyAll]);
+  const dailySelected = dailyByGpu.get(selected) ?? [];
 
   const comparison = useMemo(
-    () => buildComparison(priceIndex ?? [], dailyBySelected, metric),
-    [priceIndex, dailyBySelected, metric],
+    () => buildComparison(priceIndex ?? [], dailySelected, metric),
+    [priceIndex, dailyByGpu, selected, metric],
   );
+
+  const tape = useMemo(() => lastWindow(hourly ?? [], 72, Date.now()), [hourly]);
+
+  const profiles = useMemo(() => {
+    const rows = hourly ?? [];
+    return {
+      floor: hourOfDayProfile(rows.map((r) => ({ at: r.capturedAt, value: r.minUsd }))),
+      depth: hourOfDayProfile(rows.map((r) => ({ at: r.capturedAt, value: r.gpusAvailable }))),
+      token: hourOfDayProfile(
+        snapshots.map((s) => ({ at: s.capturedAt, value: s.usageWeightedPromptUsdPerMtok })),
+      ),
+    };
+  }, [hourly, snapshots]);
+
+  const profileHours = profiles.floor.filter((p) => p.samples > 0).length;
 
   const selectedMeta = accelerators?.find((a) => a.name === selected);
 
   if (error) return <ErrorNote error={error} />;
-  if (!accelerators || !series || !priceIndex) return <Loading label="Loading compute market…" />;
+  if (!accelerators || !dailyAll || !priceIndex) return <Loading label="Loading compute market…" />;
 
   const tracked = accelerators.filter((a) => a.latest && a.latest.offers > 0);
   const totalGpus = tracked.reduce((sum, a) => sum + (a.latest?.gpusAvailable ?? 0), 0);
+  const totalFenced = tracked.reduce((sum, a) => sum + (a.latest?.excludedOffers ?? 0), 0);
   const flagship = accelerators.find((a) => a.name === "B200")?.latest ?? null;
 
-  const tokenChange = totalChangePct(comparison.tokenRaw);
-  const gpuChange = totalChangePct(comparison.gpuRaw);
+  // Each KPI reads its own series over its own window — tying them to the
+  // token/GPU overlap would blank both until the two histories meet.
+  const tokenChange = totalChangePct(priceIndex.slice(-30).map((p) => p.weightedUsdPerMtok));
+  const gpuChange = totalChangePct(dailySelected.map((d) => d[metric]));
 
   return (
     <>
@@ -74,15 +129,17 @@ export function ComputeView({ navigate: _navigate }: { navigate: (to: string) =>
           <h2 className="section-title">What the silicon rents for</h2>
         </div>
         <p className="view-sub">
-          Live GPU rental prices from the <b>vast.ai</b> marketplace, normalized to <b>USD per GPU-hour</b>{" "}
-          (vast.ai quotes whole machines, so an 8×B200 box at $85/hr is $10.63/GPU-hr). Every tracked
-          accelerator's full offer book is swept hourly; the band is the middle 50% of live offers.
+          Live GPU rental prices from the <b>vast.ai</b> marketplace, swept every 15 minutes and
+          normalized to <b>USD per GPU-hour</b> (vast.ai quotes whole machines, so an 8×B200 box at
+          $85/hr is $10.63/GPU-hr). Prices describe the <b>practical rentable market</b>: listings from
+          deverified hosts and listings priced more than 3× away from the sweep median — parked asks
+          nobody rents — are fenced out before any statistic is computed.
         </p>
       </div>
 
       <div className="grid kpis">
         <Kpi
-          label="B200 cheapest"
+          label="B200 practical floor"
           dot="cyan"
           value={gpuHr(flagship?.minUsd ?? null)}
           unit="/GPU-hr"
@@ -91,20 +148,72 @@ export function ComputeView({ navigate: _navigate }: { navigate: (to: string) =>
         <Kpi
           label="Accelerators tracked"
           value={tracked.length}
-          sub={`${accelerators.length} in catalog · ${compact(totalGpus, 0)} GPUs on offer`}
+          sub={`${compact(totalGpus, 0)} GPUs on offer · ${totalFenced} junk listings fenced`}
         />
         <Kpi
-          label="Token price, window"
+          label="Token price, 30d"
           dot="gold"
           value={tokenChange === null ? "—" : `${tokenChange > 0 ? "+" : ""}${tokenChange.toFixed(1)}%`}
           sub="usage-weighted $/Mtok"
         />
         <Kpi
-          label={`${selectedMeta?.label ?? selected} rental, window`}
+          label={`${selectedMeta?.label ?? selected} rental trend`}
           dot="violet"
           value={gpuChange === null ? "—" : `${gpuChange > 0 ? "+" : ""}${gpuChange.toFixed(1)}%`}
-          sub={metric === "minUsd" ? "cheapest offer" : "median offer"}
+          sub={metric === "minUsd" ? "practical floor · since tracking began" : "median offer · since tracking began"}
         />
+      </div>
+
+      {/* The trading day: raw sweeps + hour-of-day seasonality */}
+      <div className="grid chart-grid">
+        <Panel className="chart-card">
+          <div className="chart-head">
+            <div>
+              <div className="chart-title">Last 72 hours — {selectedMeta?.label ?? selected}</div>
+              <div className="chart-note mono">every sweep · price left, supply depth right · UTC</div>
+            </div>
+          </div>
+          {hourly === null ? (
+            <div className="empty">Loading sweeps…</div>
+          ) : tape.length >= 6 ? (
+            <IntradayTapeChart rows={tape} height={300} />
+          ) : (
+            <div className="empty" style={{ padding: "40px 10px" }}>
+              The tape draws from 15-minute sweeps — a readable window builds up within hours.
+            </div>
+          )}
+        </Panel>
+        <Panel className="chart-card">
+          <div className="chart-head">
+            <div>
+              <div className="chart-title">The shape of a day</div>
+              <div className="chart-note mono">median per UTC hour · 100 = typical hour · 14d window</div>
+            </div>
+          </div>
+          {profileHours >= 6 ? (
+            <>
+              <HourProfileChart
+                series={[
+                  { name: `${selectedMeta?.label ?? selected} floor`, color: C.min, profile: profiles.floor },
+                  { name: "GPUs on offer", color: C.teal, dash: "dot", profile: profiles.depth },
+                  { name: "Token price (weighted)", color: C.amber, profile: profiles.token },
+                ]}
+                height={300}
+              />
+              <div className="inline-note">
+                Reads as "percent of a typical hour". A floor dipping below 100 overnight (UTC) with
+                depth above 100 is the market breathing: machines idle, supply pools, price sags —
+                and the reverse during US/EU working hours. Token prices barely move intraday; that
+                flatness against a breathing GPU line is itself the finding.
+              </div>
+            </>
+          ) : (
+            <div className="empty" style={{ padding: "40px 10px" }}>
+              Hour-of-day profiles need sweeps across at least a few different hours — they sharpen
+              over the first day and settle after a week.
+            </div>
+          )}
+        </Panel>
       </div>
 
       {/* Trend comparison — the reason this view exists */}
@@ -113,7 +222,7 @@ export function ComputeView({ navigate: _navigate }: { navigate: (to: string) =>
           <div>
             <div className="chart-title">Inference price vs. raw compute</div>
             <div className="chart-note mono">
-              both rebased to 100 at window start · {comparison.dates.length} shared days
+              daily close · both rebased to 100 at window start · {comparison.dates.length} shared days
             </div>
           </div>
           <div className="seg seg-sm">
@@ -121,7 +230,7 @@ export function ComputeView({ navigate: _navigate }: { navigate: (to: string) =>
               Median offer
             </button>
             <button className={metric === "minUsd" ? "active" : ""} onClick={() => setMetric("minUsd")}>
-              Cheapest
+              Floor
             </button>
           </div>
         </div>
@@ -137,35 +246,37 @@ export function ComputeView({ navigate: _navigate }: { navigate: (to: string) =>
               height={320}
             />
             <div className="inline-note">
-              The two series are in different units and never convert into one another — what is comparable
-              is the <b>slope</b>. A token line falling faster than the compute line means inference is
-              cheapening beyond what silicon rental explains (better utilization, competition, or margin
-              compression); the reverse means providers are absorbing a rising cost floor.
+              The two series are in different units and never convert into one another — what is
+              comparable is the <b>slope</b>. A token line falling faster than the compute line means
+              inference is cheapening beyond what silicon rental explains (better utilization,
+              competition, or margin compression); the reverse means providers are absorbing a rising
+              cost floor.
             </div>
           </>
         ) : (
           <div className="empty">
-            Overlap accumulates as GPU snapshots build up alongside the token index — check back tomorrow.
+            Overlap accumulates as GPU history builds up alongside the token index — check back
+            tomorrow.
           </div>
         )}
       </Panel>
 
-      {/* Per-accelerator price history */}
+      {/* Per-accelerator daily price history */}
       <Panel className="chart-card">
         <div className="chart-head">
           <div>
             <div className="chart-title">{selectedMeta?.label ?? selected} rental price</div>
             <div className="chart-note mono">
               {selectedMeta ? `${selectedMeta.vramGb}GB · ${TIER_LABEL[selectedMeta.tier] ?? selectedMeta.tier}` : ""}
-              {dailyBySelected.length ? ` · ${dailyBySelected.length} days` : ""}
+              {dailySelected.length ? ` · ${dailySelected.length} days · daily aggregate of all sweeps` : ""}
             </div>
           </div>
         </div>
-        {dailyBySelected.length > 1 ? (
-          <GpuBandChart points={dailyBySelected} height={340} />
+        {dailySelected.length > 1 ? (
+          <GpuBandChart points={dailySelected} height={340} />
         ) : (
           <div className="empty">
-            Only {dailyBySelected.length} day of history so far — the series fills in hourly from first ingest.
+            Only {dailySelected.length} day of history so far — the series fills in from first ingest.
           </div>
         )}
       </Panel>
@@ -184,7 +295,8 @@ export function ComputeView({ navigate: _navigate }: { navigate: (to: string) =>
               <tr>
                 <th className="left">Accelerator</th>
                 <th>VRAM</th>
-                <th>Cheapest $/GPU-hr</th>
+                <th>Floor $/GPU-hr</th>
+                <th>Verified floor</th>
                 <th>Median</th>
                 <th>Middle 50%</th>
                 <th>Spot floor</th>
@@ -202,8 +314,7 @@ export function ComputeView({ navigate: _navigate }: { navigate: (to: string) =>
                 })
                 .map((a) => {
                   const l = a.latest;
-                  const daily = toDailyPoints(byGpu.get(a.name) ?? []);
-                  const spark = daily.map((d) => d.medianUsd);
+                  const spark = (dailyByGpu.get(a.name) ?? []).map((d) => d.medianUsd);
                   const change = totalChangePct(spark);
                   return (
                     <tr
@@ -219,6 +330,7 @@ export function ComputeView({ navigate: _navigate }: { navigate: (to: string) =>
                       </td>
                       <td>{a.vramGb}GB</td>
                       <td className="val-min">{gpuHr(l?.minUsd)}</td>
+                      <td>{gpuHr(l?.verifiedMinUsd)}</td>
                       <td>{gpuHr(l?.medianUsd)}</td>
                       <td>
                         {l?.p25Usd != null && l?.p75Usd != null ? `${gpuHr(l.p25Usd)}–${gpuHr(l.p75Usd)}` : "—"}
@@ -247,10 +359,11 @@ export function ComputeView({ navigate: _navigate }: { navigate: (to: string) =>
           </table>
         </div>
         <div className="inline-note">
-          Prices are per GPU-hour for <b>on-demand, rentable</b> offers. "Spot floor" is the cheapest
-          interruptible bid — real but pre-emptible. Min and max reflect individual listings and can be
-          outliers (a mispriced card sits in the book like any other), which is why the median and the
-          middle-50% band carry the trend rather than the extremes.
+          Prices are per GPU-hour for <b>on-demand, rentable</b> offers inside the practical-price
+          fence: deverified hosts and listings priced beyond 3× either side of the sweep median are
+          excluded from every figure, including depth. "Verified floor" is the cheapest offer from a
+          host vast.ai has verified — the safe-path price. "Spot floor" is the cheapest interruptible
+          bid — real but pre-emptible, and hosts deliberately set these near zero to fill idle time.
         </div>
       </Panel>
     </>

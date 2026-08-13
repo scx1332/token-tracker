@@ -4,8 +4,8 @@ import { Kpi, Panel, SectionHead, RankList, Loading, ErrorNote, type RankItem } 
 import { SpendTokensChart, PriceIndexChart, WeeklyBarsChart, WeeklyRaceChart, ComputeVsTokensChart, C } from "../charts";
 import { usd, usdExact, compact, mtok, relTime, seriesChange, displayName, pct } from "../format";
 import { forecastCurrentWeek, toWeeklyBuckets, trimLeadingPartial } from "../weekly";
-import { toDailyPoints, buildComparison } from "../gpu";
-import type { GpuPriceRow } from "../api";
+import { buildComparison } from "../gpu";
+import type { GpuDailyRow } from "../api";
 
 /** The accelerator the market view overlays by default — today's flagship. */
 const OVERLAY_GPU = "B200";
@@ -18,7 +18,7 @@ export function MarketView({ navigate }: { navigate: (to: string) => void }) {
   const [raceMode, setRaceMode] = useState<"spend" | "tokens">("spend");
   const [weekMode, setWeekMode] = useState<"spend" | "tokens" | "both">("both");
   const [indexMode, setIndexMode] = useState<"price" | "compute">("price");
-  const [gpuSeries, setGpuSeries] = useState<GpuPriceRow[]>([]);
+  const [gpuDaily, setGpuDaily] = useState<GpuDailyRow[]>([]);
   // The race starts Jun 15 2026 — earlier history is noise for today's field.
   const RACE_SINCE = "2026-06-15";
 
@@ -36,9 +36,9 @@ export function MarketView({ navigate }: { navigate: (to: string) => void }) {
     // market page must still render, so this failure is swallowed rather than
     // promoted to the page-level error.
     api
-      .gpuSeries({ gpu: OVERLAY_GPU, days: 60 })
-      .then((g) => alive && setGpuSeries(g.series))
-      .catch(() => alive && setGpuSeries([]));
+      .gpuDaily({ gpu: OVERLAY_GPU, days: 60 })
+      .then((g) => alive && setGpuDaily(g.daily))
+      .catch(() => alive && setGpuDaily([]));
 
     return () => {
       alive = false;
@@ -46,8 +46,8 @@ export function MarketView({ navigate }: { navigate: (to: string) => void }) {
   }, []);
 
   const computeComparison = useMemo(
-    () => buildComparison(market?.priceIndex ?? [], toDailyPoints(gpuSeries), "medianUsd"),
-    [market, gpuSeries],
+    () => buildComparison(market?.priceIndex ?? [], gpuDaily, "medianUsd"),
+    [market, gpuDaily],
   );
 
   // Mon–Sun totals of the same daily series (hooks must run before any return).

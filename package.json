@@ -6,6 +6,7 @@
   "scripts": {
     "ingest": "bun run src/ingestLoop.ts",
     "ingest-once": "bun run src/ingestLoop.ts --once",
+    "gpu-once": "bun run src/gpuOnce.ts",
     "backfill": "bun run src/backfill.ts",
     "serve": "bun run src/serve.ts",
     "test": "bun test",

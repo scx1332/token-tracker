@@ -61,9 +61,13 @@ export async function runGpuIngestion(deps: GpuIngestDeps): Promise<GpuIngestRes
   // are skipped, because those say nothing about the market.
   const rows = snapshots.filter((snap): snap is GpuPriceSnapshotInsert => snap !== null);
   const withOffers = rows.filter((row) => row.offers > 0).length;
+  const excluded = rows.reduce((sum, row) => sum + row.excludedOffers, 0);
 
   const rowsWritten = await storage.insertGpuPriceSnapshots(capturedAt, rows);
-  log(`vast.ai: ${withOffers}/${ACCELERATORS.length} GPUs with live offers, ${rowsWritten} rows`);
+  log(
+    `vast.ai: ${withOffers}/${ACCELERATORS.length} GPUs with live offers, ` +
+      `${rowsWritten} rows, ${excluded} junk listings fenced out`,
+  );
 
   return {
     gpusTracked: ACCELERATORS.length,

@@ -9,16 +9,24 @@
 // bimodal: one $3.85 B200 listing sitting below a $5.31 median is a real,
 // rentable price but not "the" market price. min tells you the floor you can
 // actually hit; the p25-p75 body is what supply looks like in aggregate.
+//
+// The band describes the PRACTICAL rentable market, not the raw listing feed.
+// The raw feed contains zombie listings (an RTX 5090 asked at $53/GPU-hr while
+// the median sits at $0.49, a T4 at $12 vs a $0.15 median) that nobody ever
+// rents but that wreck max, mean and any supply weighting. `fenceOffers`
+// removes them before any statistic is computed — see its comment for the rule.
 
 import type { VastOffer } from "./vastai";
 import { numeric } from "./vastai";
 
 export interface GpuPriceSnapshot {
   gpuName: string;
-  /** Number of distinct rentable on-demand offers seen. */
+  /** Rentable on-demand offers inside the practical-price fence. */
   offers: number;
   /** Sum of GPUs across those offers — market depth, not machine count. */
   gpusAvailable: number;
+  /** Priced listings excluded as junk: deverified hosts + fence outliers. */
+  excludedOffers: number;
   // On-demand price band, USD per GPU-hour.
   minUsd: number | null;
   p25Usd: number | null;
@@ -60,6 +68,55 @@ export function isVerified(offer: VastOffer): boolean {
   return (offer.verification ?? "").toLowerCase() === "verified";
 }
 
+/** How far from the sweep median a listing may sit and still count as market. */
+export const FENCE_FACTOR = 3;
+
+/**
+ * Split an offer book into the practical rentable market and the junk around it.
+ *
+ * Two exclusion rules, applied to offers that have a usable per-GPU price:
+ *
+ *  1. `deverified` hosts are out unconditionally — vast.ai itself has revoked
+ *     their verification, and their listings linger in search results.
+ *  2. A multiplicative fence around the median: listings priced above
+ *     `median × FENCE_FACTOR` or below `median / FENCE_FACTOR` are out.
+ *
+ * Why a multiplicative fence rather than IQR/stddev: same-SKU rental prices
+ * legitimately spread ~2-3× (a home rig vs a datacenter 8× box with bundled
+ * NVMe/CPU), so additive fences misfire on thin books where the IQR collapses
+ * to ~0 (nine B300 listings, six of them at the same price). A listing 3× above
+ * the sweep median is not a price anyone pays — it is a parked ask — and one
+ * 3× below is either a data error or an offer that will be gone in minutes.
+ * The median itself is robust to the junk it is fencing out, so one pass is
+ * enough. Both bounds are inclusive.
+ *
+ * The interruptible `min_bid` floor is deliberately NOT fenced on its own
+ * distribution: hosts set near-zero floors on purpose (any revenue beats idle),
+ * so a $0.01 spot floor is a real, rentable price. A junk listing's bid dies
+ * with its listing, which is the only bid filtering that is defensible.
+ */
+export function fenceOffers(offers: VastOffer[]): {
+  kept: { offer: VastOffer; price: number }[];
+  excluded: number;
+} {
+  const priced = offers
+    .map((offer) => ({ offer, price: offerPricePerGpu(offer) }))
+    .filter((row): row is { offer: VastOffer; price: number } => row.price !== null);
+
+  const eligible = priced.filter(
+    (row) => (row.offer.verification ?? "").toLowerCase() !== "deverified",
+  );
+
+  const prices = eligible.map((row) => row.price).sort((a, b) => a - b);
+  const med = percentile(prices, 0.5);
+  const kept =
+    med === null || med <= 0
+      ? eligible
+      : eligible.filter((row) => row.price >= med / FENCE_FACTOR && row.price <= med * FENCE_FACTOR);
+
+  return { kept, excluded: priced.length - kept.length };
+}
+
 /**
  * Linear-interpolated percentile over an ascending-sorted array.
  * `q` is a fraction in [0, 1]. Returns null for an empty input.
@@ -75,32 +132,35 @@ export function percentile(sorted: number[], q: number): number | null {
   return sorted[lo]! + (sorted[hi]! - sorted[lo]!) * (pos - lo);
 }
 
-/** Collapse one GPU's offer book into a single price-band snapshot. */
+/**
+ * Collapse one GPU's offer book into a single price-band snapshot.
+ * Every statistic — including bids, depth and the verified subset — is computed
+ * over the fenced set only: a junk listing contributes nothing, not even depth.
+ */
 export function summarizeOffers(gpuName: string, offers: VastOffer[]): GpuPriceSnapshot {
-  const priced = offers
-    .map((offer) => ({ offer, price: offerPricePerGpu(offer) }))
-    .filter((row): row is { offer: VastOffer; price: number } => row.price !== null);
+  const { kept, excluded } = fenceOffers(offers);
 
-  const prices = priced.map((row) => row.price).sort((a, b) => a - b);
-  const gpusAvailable = priced.reduce((sum, row) => sum + (numeric(row.offer.num_gpus) ?? 0), 0);
+  const prices = kept.map((row) => row.price).sort((a, b) => a - b);
+  const gpusAvailable = kept.reduce((sum, row) => sum + (numeric(row.offer.num_gpus) ?? 0), 0);
 
-  const weightedTotal = priced.reduce(
+  const weightedTotal = kept.reduce(
     (sum, row) => sum + row.price * (numeric(row.offer.num_gpus) ?? 0),
     0,
   );
 
-  const bids = offers
-    .map(offerBidPerGpu)
+  const bids = kept
+    .map((row) => offerBidPerGpu(row.offer))
     .filter((bid): bid is number => bid !== null)
     .sort((a, b) => a - b);
 
-  const verified = priced.filter((row) => isVerified(row.offer));
+  const verified = kept.filter((row) => isVerified(row.offer));
   const verifiedPrices = verified.map((row) => row.price).sort((a, b) => a - b);
 
   return {
     gpuName,
-    offers: priced.length,
+    offers: kept.length,
     gpusAvailable,
+    excludedOffers: excluded,
     minUsd: prices.length ? prices[0]! : null,
     p25Usd: percentile(prices, 0.25),
     medianUsd: percentile(prices, 0.5),

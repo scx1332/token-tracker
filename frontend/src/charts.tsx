@@ -590,6 +590,162 @@ export function GpuBandChart({
 }
 
 /**
+ * The intraday tape for one accelerator: every sweep of the trailing window,
+ * floor + median lines against a supply-depth underlay on a second axis. The
+ * point of the depth bars is causality-at-a-glance: when GPUs get rented the
+ * book thins and the floor climbs — visible as bars dropping, line rising.
+ */
+export function IntradayTapeChart({
+  rows,
+  height = 300,
+}: {
+  rows: {
+    capturedAt: string;
+    minUsd: number | null;
+    medianUsd: number | null;
+    gpusAvailable: number;
+  }[];
+  height?: number;
+}) {
+  const data = useMemo<Data[]>(() => {
+    const x = rows.map((r) => r.capturedAt);
+    return [
+      {
+        type: "bar",
+        name: "GPUs on offer",
+        x,
+        y: rows.map((r) => r.gpusAvailable),
+        yaxis: "y2",
+        marker: { color: "rgba(14,124,134,0.18)" },
+        hovertemplate: "%{y} GPUs<extra>depth</extra>",
+      },
+      {
+        type: "scatter",
+        mode: "lines",
+        name: "Median offer",
+        x,
+        y: rows.map((r) => r.medianUsd),
+        line: { color: C.indigo, width: 1.6, dash: "dot" },
+        hovertemplate: "$%{y:.3~f}/GPU-hr<extra>median</extra>",
+      },
+      {
+        type: "scatter",
+        mode: "lines+markers",
+        name: "Cheapest offer",
+        x,
+        y: rows.map((r) => r.minUsd),
+        line: { color: C.min, width: 2.2 },
+        marker: { size: 4, color: C.min },
+        hovertemplate: "$%{y:.3~f}/GPU-hr<extra>min</extra>",
+      },
+    ];
+  }, [rows]);
+
+  const layout = baseLayout({
+    height,
+    showlegend: true,
+    legend: { orientation: "h", x: 0, y: 1.02, yanchor: "bottom", font: { family: MONO, size: 11, color: C.muted } },
+    margin: { l: 56, r: 46, t: 46, b: 34 },
+    yaxis: {
+      gridcolor: C.grid,
+      showgrid: true,
+      zeroline: false,
+      tickprefix: "$",
+      tickfont: { family: MONO, color: C.faint, size: 10 },
+      title: { text: "USD / GPU-hour", font: { family: MONO, size: 10, color: C.faint } },
+    },
+    // Depth axis: right side, no grid (the $ grid is the reading grid), and a
+    // hard floor at zero so the bars sit on the axis instead of floating.
+    yaxis2: {
+      overlaying: "y",
+      side: "right",
+      rangemode: "tozero",
+      showgrid: false,
+      zeroline: false,
+      tickfont: { family: MONO, color: "rgba(14,124,134,0.7)", size: 10 },
+      title: { text: "GPUs", font: { family: MONO, size: 10, color: "rgba(14,124,134,0.7)" } },
+    } as never,
+  });
+
+  return <Plot data={data} layout={layout} config={baseConfig} className="plot" style={{ width: "100%", height }} useResizeHandler />;
+}
+
+/**
+ * Hour-of-day seasonality: each series is that metric's median per UTC hour,
+ * normalized so 100 = a typical hour. Reads directly as "when is it cheap":
+ * a floor line at 95 at 04:00 means the small hours run 5% under typical.
+ */
+export function HourProfileChart({
+  series,
+  height = 300,
+}: {
+  series: {
+    name: string;
+    color: string;
+    dash?: "solid" | "dot" | "dash";
+    profile: { hour: number; index: number | null; samples: number }[];
+  }[];
+  height?: number;
+}) {
+  const data = useMemo<Data[]>(
+    () =>
+      series.map((s) => ({
+        type: "scatter" as const,
+        mode: "lines+markers" as const,
+        name: s.name,
+        x: s.profile.map((p) => p.hour),
+        y: s.profile.map((p) => p.index),
+        connectgaps: false,
+        line: { color: s.color, width: 2, dash: s.dash ?? "solid" },
+        marker: { size: 4, color: s.color },
+        customdata: s.profile.map((p) => p.samples) as unknown as number[],
+        hovertemplate: `%{y:.1f} · n=%{customdata}<extra>${escapeHtml(s.name)}</extra>`,
+      })),
+    [series],
+  );
+
+  const layout = baseLayout({
+    height,
+    showlegend: true,
+    legend: { orientation: "h", x: 0, y: 1.02, yanchor: "bottom", font: { family: MONO, size: 11, color: C.muted } },
+    margin: { l: 48, r: 18, t: 46, b: 40 },
+    xaxis: {
+      gridcolor: C.grid,
+      showgrid: false,
+      zeroline: false,
+      tickmode: "array",
+      tickvals: [0, 3, 6, 9, 12, 15, 18, 21],
+      ticktext: ["00", "03", "06", "09", "12", "15", "18", "21"],
+      range: [-0.5, 23.5],
+      tickfont: { family: MONO, color: C.faint, size: 10 },
+      title: { text: "hour of day (UTC)", font: { family: MONO, size: 10, color: C.faint } },
+      ...AXIS_SPIKE,
+    } as never,
+    yaxis: {
+      gridcolor: C.grid,
+      showgrid: true,
+      zeroline: false,
+      tickfont: { family: MONO, color: C.faint, size: 10 },
+      title: { text: "index (100 = typical hour)", font: { family: MONO, size: 10, color: C.faint } },
+    },
+    shapes: [
+      {
+        type: "line",
+        xref: "paper",
+        x0: 0,
+        x1: 1,
+        yref: "y",
+        y0: 100,
+        y1: 100,
+        line: { color: C.line, width: 1, dash: "dash" },
+      },
+    ],
+  });
+
+  return <Plot data={data} layout={layout} config={baseConfig} className="plot" style={{ width: "100%", height }} useResizeHandler />;
+}
+
+/**
  * Token price vs. raw compute price, both rebased to 100 at the left edge.
  *
  * The units genuinely don't convert ($/Mtok vs $/GPU-hour), so the chart

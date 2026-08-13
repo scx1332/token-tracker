@@ -100,6 +100,8 @@ export function createServer(storage: Storage, options: ServerOptions) {
         return handleGpuLatest();
       case "/gpu/series":
         return handleGpuSeries(q);
+      case "/gpu/daily":
+        return handleGpuDaily(q);
       case "/apps":
         return handleKvJson("apps_ranking", { day: [], week: [], month: [] });
       case "/usage/weekly":
@@ -325,6 +327,17 @@ export function createServer(storage: Storage, options: ServerOptions) {
       limit: limitFromParams(params, 20_000, 100_000),
     });
     return json({ series, accelerators: ACCELERATORS });
+  }
+
+  async function handleGpuDaily(params: URLSearchParams): Promise<Response> {
+    const gpuName = params.get("gpu")?.trim();
+    const since = sinceFromParams(params, 60);
+    const daily = await storage.getGpuDaily({
+      ...(gpuName ? { gpuName } : {}),
+      since,
+      limit: limitFromParams(params, 5_000, 20_000),
+    });
+    return json({ daily, accelerators: ACCELERATORS });
   }
 
   const server = Bun.serve({

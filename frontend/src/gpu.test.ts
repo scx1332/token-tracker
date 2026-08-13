@@ -1,113 +1,124 @@
 import { test, expect, describe } from "bun:test";
 import {
-  utcDay,
-  toDailyPoints,
-  groupByGpu,
+  groupDailyByGpu,
+  lastWindow,
+  hourOfDayProfile,
   rebase,
   buildComparison,
   totalChangePct,
 } from "./gpu";
-import type { GpuPriceRow, PriceIndexPoint } from "./api";
+import type { GpuDailyRow, PriceIndexPoint } from "./api";
 
-function row(partial: Partial<GpuPriceRow> & { capturedAt: string }): GpuPriceRow {
+function daily(partial: Partial<GpuDailyRow> & { date: string }): GpuDailyRow {
   return {
     gpuName: "B200",
-    offers: 10,
-    gpusAvailable: 40,
     minUsd: 4,
-    p25Usd: 4.5,
     medianUsd: 5,
+    p25Usd: 4.5,
     p75Usd: 6,
-    maxUsd: 7,
-    meanUsd: 5.2,
-    supplyWeightedUsd: 5.3,
-    minBidUsd: 3,
-    verifiedOffers: 5,
-    verifiedGpusAvailable: 20,
-    verifiedMinUsd: 4.5,
-    verifiedMedianUsd: 5,
+    gpusAvailable: 40,
+    samples: 24,
     ...partial,
   };
 }
 
-describe("utcDay", () => {
-  test("takes the UTC calendar day", () => {
-    expect(utcDay("2026-08-13T23:59:00.000Z")).toBe("2026-08-13");
-  });
-});
-
-describe("toDailyPoints", () => {
-  test("groups hourly snapshots into one point per day, sorted", () => {
-    const points = toDailyPoints([
-      row({ capturedAt: "2026-08-14T01:00:00.000Z" }),
-      row({ capturedAt: "2026-08-13T01:00:00.000Z" }),
-      row({ capturedAt: "2026-08-13T05:00:00.000Z" }),
-    ]);
-    expect(points.map((p) => p.date)).toEqual(["2026-08-13", "2026-08-14"]);
-    expect(points[0]!.samples).toBe(2);
-    expect(points[1]!.samples).toBe(1);
-  });
-
-  test("daily min is the best price reachable at any hour", () => {
-    const points = toDailyPoints([
-      row({ capturedAt: "2026-08-13T01:00:00.000Z", minUsd: 4 }),
-      row({ capturedAt: "2026-08-13T02:00:00.000Z", minUsd: 2.5 }),
-      row({ capturedAt: "2026-08-13T03:00:00.000Z", minUsd: 3 }),
-    ]);
-    expect(points[0]!.minUsd).toBe(2.5);
-  });
-
-  test("daily median is the median of hourly medians, so deep hours don't outvote thin ones", () => {
-    const points = toDailyPoints([
-      row({ capturedAt: "2026-08-13T01:00:00.000Z", medianUsd: 5, offers: 1 }),
-      row({ capturedAt: "2026-08-13T02:00:00.000Z", medianUsd: 7, offers: 500 }),
-      row({ capturedAt: "2026-08-13T03:00:00.000Z", medianUsd: 6, offers: 1 }),
-    ]);
-    expect(points[0]!.medianUsd).toBe(6);
-  });
-
-  test("depth reports the day's peak availability", () => {
-    const points = toDailyPoints([
-      row({ capturedAt: "2026-08-13T01:00:00.000Z", gpusAvailable: 30 }),
-      row({ capturedAt: "2026-08-13T02:00:00.000Z", gpusAvailable: 90 }),
-    ]);
-    expect(points[0]!.gpusAvailable).toBe(90);
-  });
-
-  test("a day where the market was empty stays null, never NaN", () => {
-    const points = toDailyPoints([
-      row({ capturedAt: "2026-08-13T01:00:00.000Z", minUsd: null, medianUsd: null, p25Usd: null, p75Usd: null }),
-    ]);
-    expect(points[0]!.minUsd).toBeNull();
-    expect(points[0]!.medianUsd).toBeNull();
-  });
-
-  test("nulls are skipped rather than dragging the day's stats down", () => {
-    const points = toDailyPoints([
-      row({ capturedAt: "2026-08-13T01:00:00.000Z", minUsd: null, medianUsd: null }),
-      row({ capturedAt: "2026-08-13T02:00:00.000Z", minUsd: 3, medianUsd: 4 }),
-    ]);
-    expect(points[0]!.minUsd).toBe(3);
-    expect(points[0]!.medianUsd).toBe(4);
-  });
-
-  test("empty input yields no points", () => {
-    expect(toDailyPoints([])).toEqual([]);
-  });
-});
-
-describe("groupByGpu", () => {
-  test("splits by GPU and sorts each series by time", () => {
-    const grouped = groupByGpu([
-      row({ gpuName: "B200", capturedAt: "2026-08-13T05:00:00.000Z" }),
-      row({ gpuName: "B300", capturedAt: "2026-08-13T01:00:00.000Z" }),
-      row({ gpuName: "B200", capturedAt: "2026-08-13T01:00:00.000Z" }),
+describe("groupDailyByGpu", () => {
+  test("splits by GPU and sorts each series by date", () => {
+    const grouped = groupDailyByGpu([
+      daily({ gpuName: "B200", date: "2026-08-13" }),
+      daily({ gpuName: "B300", date: "2026-08-12" }),
+      daily({ gpuName: "B200", date: "2026-08-11" }),
     ]);
     expect([...grouped.keys()].sort()).toEqual(["B200", "B300"]);
-    expect(grouped.get("B200")!.map((r) => r.capturedAt)).toEqual([
-      "2026-08-13T01:00:00.000Z",
-      "2026-08-13T05:00:00.000Z",
+    expect(grouped.get("B200")!.map((r) => r.date)).toEqual(["2026-08-11", "2026-08-13"]);
+  });
+});
+
+describe("lastWindow", () => {
+  const now = Date.parse("2026-08-13T12:00:00.000Z");
+  test("keeps rows inside the trailing window, inclusive of the edge", () => {
+    const rows = [
+      { capturedAt: "2026-08-10T11:00:00.000Z" }, // 73h ago — out
+      { capturedAt: "2026-08-10T12:00:00.000Z" }, // exactly 72h — in
+      { capturedAt: "2026-08-13T11:45:00.000Z" }, // in
+    ];
+    expect(lastWindow(rows, 72, now).map((r) => r.capturedAt)).toEqual([
+      "2026-08-10T12:00:00.000Z",
+      "2026-08-13T11:45:00.000Z",
     ]);
+  });
+
+  test("unparseable timestamps are dropped, not kept by accident", () => {
+    expect(lastWindow([{ capturedAt: "garbage" }], 72, now)).toEqual([]);
+  });
+});
+
+describe("hourOfDayProfile", () => {
+  const at = (day: number, hour: number) =>
+    `2026-08-${String(day).padStart(2, "0")}T${String(hour).padStart(2, "0")}:15:00.000Z`;
+
+  test("groups by UTC hour and takes the median per hour", () => {
+    const profile = hourOfDayProfile([
+      { at: at(10, 4), value: 10 },
+      { at: at(11, 4), value: 20 },
+      { at: at(12, 4), value: 30 },
+      { at: at(10, 14), value: 40 },
+    ]);
+    expect(profile).toHaveLength(24);
+    expect(profile[4]!.median).toBe(20);
+    expect(profile[4]!.samples).toBe(3);
+    expect(profile[14]!.median).toBe(40);
+    expect(profile[0]!.median).toBeNull();
+    expect(profile[0]!.samples).toBe(0);
+  });
+
+  test("index is percent of a typical hour, hours weighted equally", () => {
+    // Hour 4 has many samples at 10, hour 14 one sample at 30 → baseline is
+    // the median of {10, 30} = 20, NOT dragged toward the oversampled hour.
+    const profile = hourOfDayProfile([
+      { at: at(10, 4), value: 10 },
+      { at: at(11, 4), value: 10 },
+      { at: at(12, 4), value: 10 },
+      { at: at(13, 4), value: 10 },
+      { at: at(10, 14), value: 30 },
+    ]);
+    expect(profile[4]!.index).toBeCloseTo(50, 9);
+    expect(profile[14]!.index).toBeCloseTo(150, 9);
+  });
+
+  test("zero is a real value (depth can be zero), indexed as 0 not null", () => {
+    const profile = hourOfDayProfile([
+      { at: at(10, 2), value: 0 },
+      { at: at(10, 12), value: 50 },
+      { at: at(10, 18), value: 50 },
+    ]);
+    expect(profile[2]!.median).toBe(0);
+    expect(profile[2]!.index).toBe(0);
+  });
+
+  test("an all-zero series cannot be normalized — indexes are null", () => {
+    const profile = hourOfDayProfile([
+      { at: at(10, 2), value: 0 },
+      { at: at(10, 3), value: 0 },
+    ]);
+    expect(profile[2]!.median).toBe(0);
+    expect(profile[2]!.index).toBeNull();
+  });
+
+  test("nulls and garbage timestamps are skipped", () => {
+    const profile = hourOfDayProfile([
+      { at: at(10, 5), value: null },
+      { at: "not-a-date", value: 10 },
+      { at: at(10, 5), value: 12 },
+    ]);
+    expect(profile[5]!.median).toBe(12);
+    expect(profile[5]!.samples).toBe(1);
+  });
+
+  test("empty input yields 24 empty hours", () => {
+    const profile = hourOfDayProfile([]);
+    expect(profile).toHaveLength(24);
+    expect(profile.every((p) => p.median === null && p.index === null && p.samples === 0)).toBe(true);
   });
 });
 
@@ -149,10 +160,10 @@ describe("buildComparison", () => {
     { date: "2026-08-12", weightedUsdPerMtok: 0.4, medianUsdPerMtok: 0.5 },
     { date: "2026-08-13", weightedUsdPerMtok: 0.25, medianUsdPerMtok: 0.4 },
   ];
-  const gpuDaily = toDailyPoints([
-    row({ capturedAt: "2026-08-12T01:00:00.000Z", medianUsd: 5, minUsd: 4 }),
-    row({ capturedAt: "2026-08-13T01:00:00.000Z", medianUsd: 6, minUsd: 3 }),
-  ]);
+  const gpuDaily = [
+    daily({ date: "2026-08-12", medianUsd: 5, minUsd: 4 }),
+    daily({ date: "2026-08-13", medianUsd: 6, minUsd: 3 }),
+  ];
 
   test("restricts the axis to dates both series cover", () => {
     const c = buildComparison(priceIndex, gpuDaily);
@@ -181,7 +192,7 @@ describe("buildComparison", () => {
   });
 
   test("no overlap yields an empty axis rather than a misleading stub", () => {
-    const c = buildComparison(priceIndex, toDailyPoints([row({ capturedAt: "2026-09-01T01:00:00.000Z" })]));
+    const c = buildComparison(priceIndex, [daily({ date: "2026-09-01" })]);
     expect(c.dates).toEqual([]);
     expect(c.tokenIndex).toEqual([]);
   });

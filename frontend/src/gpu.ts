@@ -1,6 +1,11 @@
-// Pure helpers for the GPU rental series: collapsing the hourly offer-book
-// snapshots to daily points, and putting compute prices on the same axis as
-// token prices.
+// Pure helpers for the GPU rental series: putting compute prices on the same
+// axis as token prices, and folding sub-hourly sweeps into hour-of-day
+// profiles.
+//
+// Daily collapsing lives on the server now (`/gpu/daily`) — with a 15-minute
+// sweep cadence the raw all-GPU series is far too heavy to ship to the browser
+// just to be averaged there. What stays here is what is genuinely
+// presentational: rebasing, alignment, seasonality.
 //
 // The comparison this file exists for is trend, not level. Raw accelerator
 // rental is quoted in $/GPU-hour and inference in $/Mtok; the ratio between
@@ -9,20 +14,40 @@
 // to 100 at the start of the window answers "has inference cheapened faster
 // than the silicon under it?" without pretending to a conversion we can't make.
 
-import type { GpuPriceRow, PriceIndexPoint } from "./api";
+import type { GpuDailyRow, PriceIndexPoint } from "./api";
 
-export interface GpuDailyPoint {
+/** The date+band shape buildComparison needs — server daily rows satisfy it. */
+export interface DailyBandPoint {
   date: string;
-  /** Cheapest rentable offer seen that day, USD/GPU-hour. */
   minUsd: number | null;
-  /** Median of the hourly medians — the day's typical price. */
   medianUsd: number | null;
-  p25Usd: number | null;
-  p75Usd: number | null;
-  /** Peak GPU depth observed that day. */
-  gpusAvailable: number;
-  /** Hourly snapshots that contributed. */
-  samples: number;
+}
+
+/** Split the all-GPU daily rollup into one date-sorted series per GPU. */
+export function groupDailyByGpu(rows: GpuDailyRow[]): Map<string, GpuDailyRow[]> {
+  const byGpu = new Map<string, GpuDailyRow[]>();
+  for (const row of rows) {
+    const bucket = byGpu.get(row.gpuName);
+    if (bucket) bucket.push(row);
+    else byGpu.set(row.gpuName, [row]);
+  }
+  for (const series of byGpu.values()) {
+    series.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+  }
+  return byGpu;
+}
+
+/** Rows whose timestamp falls inside the trailing `hours`-hour window. */
+export function lastWindow<T extends { capturedAt: string }>(
+  rows: T[],
+  hours: number,
+  nowMs: number,
+): T[] {
+  const cutoff = nowMs - hours * 3_600_000;
+  return rows.filter((row) => {
+    const t = Date.parse(row.capturedAt);
+    return Number.isFinite(t) && t >= cutoff;
+  });
 }
 
 function median(values: number[]): number | null {
@@ -32,60 +57,53 @@ function median(values: number[]): number | null {
   return sorted.length % 2 === 1 ? sorted[mid]! : (sorted[mid - 1]! + sorted[mid]!) / 2;
 }
 
-function defined(values: (number | null)[]): number[] {
-  return values.filter((v): v is number => v !== null && Number.isFinite(v));
-}
-
-/** UTC calendar day of an ISO timestamp. */
-export function utcDay(iso: string): string {
-  return iso.slice(0, 10);
+export interface HourProfilePoint {
+  /** UTC hour, 0-23. */
+  hour: number;
+  /** Median of the metric across every sample that landed in this hour. */
+  median: number | null;
+  /** median / (median of the hourly medians) × 100 — the seasonality index. */
+  index: number | null;
+  /** Samples that contributed. */
+  samples: number;
 }
 
 /**
- * Collapse hourly snapshots for ONE GPU into one point per UTC day.
+ * Fold a timestamped series into a 24-point UTC hour-of-day profile.
  *
- * The day's `minUsd` is the true minimum across the day (the best price that
- * was actually rentable at some point), while `medianUsd` is the median of the
- * hourly medians rather than a median over pooled offers — hours with a deeper
- * book must not outvote thin ones when describing a typical day.
+ * Per-hour medians (robust to the odd spike) are normalized by the median of
+ * the hourly medians, so every hour weighs equally in the baseline no matter
+ * how unevenly sweeps are distributed — a series that only started yesterday
+ * afternoon must not make 14:00 look like "the average hour". The index reads
+ * as "percent of a typical hour": 95 at 04:00 means 4 AM UTC runs 5% cheap.
+ *
+ * Zero is a legal value here (a GPU's depth can genuinely be zero at 3 AM), so
+ * unlike `rebase` this does its own normalization and only returns null indexes
+ * when the baseline itself is missing or zero.
  */
-export function toDailyPoints(rows: GpuPriceRow[]): GpuDailyPoint[] {
-  const byDay = new Map<string, GpuPriceRow[]>();
-  for (const row of rows) {
-    const day = utcDay(row.capturedAt);
-    const bucket = byDay.get(day);
-    if (bucket) bucket.push(row);
-    else byDay.set(day, [row]);
+export function hourOfDayProfile(
+  points: { at: string; value: number | null }[],
+): HourProfilePoint[] {
+  const byHour: number[][] = Array.from({ length: 24 }, () => []);
+  for (const point of points) {
+    if (point.value === null || !Number.isFinite(point.value)) continue;
+    const t = new Date(point.at);
+    if (Number.isNaN(t.getTime())) continue;
+    byHour[t.getUTCHours()]!.push(point.value);
   }
 
-  return [...byDay.entries()]
-    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
-    .map(([date, dayRows]) => {
-      const mins = defined(dayRows.map((r) => r.minUsd));
-      return {
-        date,
-        minUsd: mins.length ? Math.min(...mins) : null,
-        medianUsd: median(defined(dayRows.map((r) => r.medianUsd))),
-        p25Usd: median(defined(dayRows.map((r) => r.p25Usd))),
-        p75Usd: median(defined(dayRows.map((r) => r.p75Usd))),
-        gpusAvailable: dayRows.reduce((max, r) => Math.max(max, r.gpusAvailable), 0),
-        samples: dayRows.length,
-      };
-    });
-}
+  const medians = byHour.map((values) => median(values));
+  const baseline = median(medians.filter((v): v is number => v !== null));
 
-/** Split a multi-GPU series into one sorted series per GPU name. */
-export function groupByGpu(rows: GpuPriceRow[]): Map<string, GpuPriceRow[]> {
-  const byGpu = new Map<string, GpuPriceRow[]>();
-  for (const row of rows) {
-    const bucket = byGpu.get(row.gpuName);
-    if (bucket) bucket.push(row);
-    else byGpu.set(row.gpuName, [row]);
-  }
-  for (const series of byGpu.values()) {
-    series.sort((a, b) => (a.capturedAt < b.capturedAt ? -1 : a.capturedAt > b.capturedAt ? 1 : 0));
-  }
-  return byGpu;
+  return medians.map((value, hour) => ({
+    hour,
+    median: value,
+    index:
+      value === null || baseline === null || baseline === 0
+        ? null
+        : (value / baseline) * 100,
+    samples: byHour[hour]!.length,
+  }));
 }
 
 /**
@@ -125,7 +143,7 @@ export interface ComparisonSeries {
  */
 export function buildComparison(
   priceIndex: PriceIndexPoint[],
-  gpuDaily: GpuDailyPoint[],
+  gpuDaily: DailyBandPoint[],
   gpuMetric: "minUsd" | "medianUsd" = "medianUsd",
 ): ComparisonSeries {
   const gpuByDate = new Map(gpuDaily.map((p) => [p.date, p]));

@@ -43,6 +43,31 @@ async function main(): Promise<void> {
 
   let backfilled = (await storage.getState("backfill_done")) !== null;
 
+  // GPU rental prices run on their own, faster clock (the offer book moves
+  // sub-hourly and a sweep is ~50 cheap requests), and as an independent data
+  // source: a vast.ai failure must never fail an OpenRouter pass or vice versa.
+  // In --once mode a single inline sweep runs after the main pass instead.
+  const gpuLoop = async () => {
+    while (!stopping) {
+      try {
+        const g = await runGpuIngestion({
+          storage,
+          client: vastClient,
+          concurrency: Math.min(4, config.concurrency),
+          requestDelayMs: config.requestDelayMs,
+          signal: controller.signal,
+          log,
+        });
+        if (g.errors.length) log(`vast.ai warnings: ${g.errors.join("; ")}`);
+      } catch (error) {
+        log(`vast.ai pass FAILED: ${error instanceof Error ? error.message : String(error)}`);
+      }
+      if (stopping) break;
+      await sleep(config.gpuIntervalMs);
+    }
+  };
+  if (config.fetchGpu && !config.once) void gpuLoop();
+
   do {
     const started = Date.now();
     let passOk = false;
@@ -55,10 +80,8 @@ async function main(): Promise<void> {
       log(`pass FAILED: ${error instanceof Error ? error.message : String(error)}`);
     }
 
-    // GPU rental prices are an independent data source: a vast.ai failure must
-    // not mark the OpenRouter pass bad, so it runs in its own try even when the
-    // pass above threw.
-    if (config.fetchGpu && !stopping) {
+    // --once runs a single GPU sweep inline (the loop above is not started).
+    if (config.fetchGpu && config.once && !stopping) {
       try {
         const g = await runGpuIngestion({
           storage,

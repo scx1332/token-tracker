@@ -10,6 +10,7 @@ export interface IngestConfig {
   fetchEndpoints: boolean;
   fetchUsage: boolean;
   fetchGpu: boolean;
+  gpuIntervalMs: number;
   vastBaseUrl: string;
   vastApiKey: string | null;
   backfillDays: number;
@@ -24,6 +25,9 @@ export interface ServerConfig {
 
 const DEFAULT_BASE_URL = "https://openrouter.ai";
 const DEFAULT_VAST_BASE_URL = "https://console.vast.ai";
+// GPU sweeps are much cheaper than an OpenRouter pass (~50 requests total) and
+// the offer book genuinely moves sub-hourly, so they run on a faster clock.
+const DEFAULT_GPU_INTERVAL_MS = 900_000; // 15 min
 const DEFAULT_INTERVAL_MS = 3_600_000; // 1 hour
 const DEFAULT_CONCURRENCY = 6;
 const DEFAULT_REQUEST_DELAY_MS = 120;
@@ -52,6 +56,10 @@ export function parseIngestConfig(
     fetchEndpoints: parseBoolean(parsed.values["fetch-endpoints"] ?? env.INGEST_FETCH_ENDPOINTS ?? "true"),
     fetchUsage: parseBoolean(parsed.values["fetch-usage"] ?? env.INGEST_FETCH_USAGE ?? "true"),
     fetchGpu: parseBoolean(parsed.values["fetch-gpu"] ?? env.INGEST_FETCH_GPU ?? "true"),
+    gpuIntervalMs: Math.max(
+      60_000,
+      parseNumber("--gpu-interval-ms", parsed.values["gpu-interval-ms"] ?? env.INGEST_GPU_INTERVAL_MS ?? String(DEFAULT_GPU_INTERVAL_MS)),
+    ),
     vastBaseUrl: stripTrailingSlash(parsed.values["vast-base-url"] ?? env.VASTAI_BASE_URL ?? DEFAULT_VAST_BASE_URL),
     vastApiKey: nonEmpty(parsed.values["vast-api-key"] ?? env.VASTAI_API_KEY),
     backfillDays: parseNumber("--backfill-days", parsed.values["backfill-days"] ?? env.BACKFILL_DAYS ?? String(DEFAULT_BACKFILL_DAYS)),
@@ -162,6 +170,8 @@ Options:
   --fetch-endpoints <bool>    Fetch per-provider pricing. Default true.
   --fetch-usage <bool>        Fetch usage/ranking analytics. Default true.
   --fetch-gpu <bool>          Fetch vast.ai GPU rental prices. Default true.
+  --gpu-interval-ms <n>       GPU sweep cadence, independent of the OpenRouter
+                              pass. Default 900000 (15 min), min 60000.
   --vast-base-url <url>       vast.ai base URL. Default https://console.vast.ai
   --vast-api-key <key>        vast.ai key (or VASTAI_API_KEY). Only needed for
                               historical market metrics, which require a key with

@@ -163,12 +163,31 @@ export interface MarketRow {
   cheapestFrontierUsdPerMtok: number | null;
 }
 
-/** One hourly price-band snapshot of a GPU's vast.ai offer book. */
+/** One UTC-day aggregate of a GPU's hourly band snapshots (server-side). */
+export interface GpuDailyRow {
+  gpuName: string;
+  /** YYYY-MM-DD, UTC. */
+  date: string;
+  /** Best price reachable at any point in the day. */
+  minUsd: number | null;
+  /** Median of the sweeps' medians — the day's typical price. */
+  medianUsd: number | null;
+  p25Usd: number | null;
+  p75Usd: number | null;
+  /** Peak depth observed that day. */
+  gpusAvailable: number;
+  /** Number of sweeps that contributed. */
+  samples: number;
+}
+
+/** One price-band snapshot of a GPU's vast.ai offer book (fenced/practical). */
 export interface GpuPriceRow {
   gpuName: string;
   capturedAt: string;
   offers: number;
   gpusAvailable: number;
+  /** Priced listings the fence excluded as junk (deverified + outliers). */
+  excludedOffers: number;
   minUsd: number | null;
   p25Usd: number | null;
   medianUsd: number | null;
@@ -435,6 +454,12 @@ export class Storage {
     await this.pool.query(
       `CREATE INDEX IF NOT EXISTS ${quoteIdent("gpu_price_captured_idx")}
        ON ${this.t("gpu_price_snapshots")} (captured_at DESC)`,
+    );
+    // Migration for tables created before the outlier fence existed. Rows from
+    // then default to 0 ("nothing known to be excluded"), which is honest.
+    await this.pool.query(
+      `ALTER TABLE ${this.t("gpu_price_snapshots")}
+       ADD COLUMN IF NOT EXISTS excluded_offers INTEGER NOT NULL DEFAULT 0`,
     );
 
     await this.pool.query(`
@@ -1285,6 +1310,7 @@ export class Storage {
         capturedAt.toISOString(),
         snap.offers,
         snap.gpusAvailable,
+        snap.excludedOffers,
         snap.minUsd,
         snap.p25Usd,
         snap.medianUsd,
@@ -1299,19 +1325,20 @@ export class Storage {
         snap.verifiedMedianUsd,
         source,
       );
-      const slots = Array.from({ length: 17 }, (_, i) => `$${base + i + 1}`);
+      const slots = Array.from({ length: 18 }, (_, i) => `$${base + i + 1}`);
       return `(${slots.join(",")})`;
     });
 
     await this.pool.query(
       `INSERT INTO ${this.t("gpu_price_snapshots")} (
-        gpu_name, captured_at, offers, gpus_available, min_usd, p25_usd, median_usd,
+        gpu_name, captured_at, offers, gpus_available, excluded_offers, min_usd, p25_usd, median_usd,
         p75_usd, max_usd, mean_usd, supply_weighted_usd, min_bid_usd,
         verified_offers, verified_gpus_available, verified_min_usd, verified_median_usd, source
       ) VALUES ${tuples.join(",")}
       ON CONFLICT (gpu_name, captured_at) DO UPDATE SET
         offers = EXCLUDED.offers,
         gpus_available = EXCLUDED.gpus_available,
+        excluded_offers = EXCLUDED.excluded_offers,
         min_usd = EXCLUDED.min_usd,
         p25_usd = EXCLUDED.p25_usd,
         median_usd = EXCLUDED.median_usd,
@@ -1354,6 +1381,60 @@ export class Storage {
       params,
     );
     return result.rows.map(mapGpuPrice);
+  }
+
+  /**
+   * One row per (GPU, UTC day), aggregated in SQL so the sub-hourly sweep
+   * cadence never has to ship every snapshot to the browser. Semantics match
+   * what the frontend used to compute client-side: the day's min is the best
+   * price reachable at any sweep; median/p25/p75 are medians of the sweeps'
+   * values, so a sweep with a deep book cannot outvote a thin one; depth is
+   * the day's peak.
+   */
+  async getGpuDaily(
+    filter: { gpuName?: string; since?: string; limit?: number } = {},
+  ): Promise<GpuDailyRow[]> {
+    const params: unknown[] = [];
+    const clauses: string[] = [];
+    if (filter.gpuName) {
+      params.push(filter.gpuName);
+      clauses.push(`gpu_name = $${params.length}`);
+    }
+    if (filter.since) {
+      params.push(filter.since);
+      clauses.push(`captured_at >= $${params.length}`);
+    }
+    params.push(resolveLimit(filter.limit));
+
+    const result = await this.pool.query(
+      `SELECT gpu_name,
+              -- TEXT, not ::date: a DATE here would depend on the pg type
+              -- parser of whichever pool runs the query (scripts that build
+              -- their own pool would get a JS Date and a timezone shift).
+              TO_CHAR(captured_at AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS day,
+              MIN(min_usd) AS min_usd,
+              PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY median_usd::float8) AS median_usd,
+              PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY p25_usd::float8) AS p25_usd,
+              PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY p75_usd::float8) AS p75_usd,
+              MAX(gpus_available) AS gpus_available,
+              COUNT(*) AS samples
+       FROM ${this.t("gpu_price_snapshots")}
+       ${clauses.length ? `WHERE ${clauses.join(" AND ")}` : ""}
+       GROUP BY gpu_name, day
+       ORDER BY day ASC, gpu_name ASC
+       LIMIT $${params.length}`,
+      params,
+    );
+    return result.rows.map((row: any) => ({
+      gpuName: String(row.gpu_name),
+      date: String(row.day),
+      minUsd: num(row.min_usd),
+      medianUsd: num(row.median_usd),
+      p25Usd: num(row.p25_usd),
+      p75Usd: num(row.p75_usd),
+      gpusAvailable: Number(row.gpus_available ?? 0),
+      samples: Number(row.samples ?? 0),
+    }));
   }
 
   /** The most recent snapshot for every GPU that has ever been captured. */
@@ -1688,6 +1769,7 @@ function mapGpuPrice(row: any): GpuPriceRow {
     capturedAt: toIso(row.captured_at) ?? "",
     offers: Number(row.offers ?? 0),
     gpusAvailable: Number(row.gpus_available ?? 0),
+    excludedOffers: Number(row.excluded_offers ?? 0),
     minUsd: num(row.min_usd),
     p25Usd: num(row.p25_usd),
     medianUsd: num(row.median_usd),

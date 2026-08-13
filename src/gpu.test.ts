@@ -4,8 +4,10 @@ import {
   offerBidPerGpu,
   isVerified,
   percentile,
+  fenceOffers,
   summarizeOffers,
   usdPerMtokFloor,
+  FENCE_FACTOR,
 } from "./gpu";
 import type { VastOffer } from "./vastai";
 
@@ -74,12 +76,93 @@ describe("percentile", () => {
   });
 });
 
+describe("fenceOffers", () => {
+  test("drops listings priced beyond FENCE_FACTOR× the median, both sides", () => {
+    // Median of [1, 1.1, 1.2, 1.3, 40] is 1.2 → fence [0.4, 3.6].
+    const { kept, excluded } = fenceOffers([
+      offer({ id: 1, dph_total: 1 }),
+      offer({ id: 2, dph_total: 1.1 }),
+      offer({ id: 3, dph_total: 1.2 }),
+      offer({ id: 4, dph_total: 1.3 }),
+      offer({ id: 5, dph_total: 40 }), // the $53 RTX 5090 of this book
+    ]);
+    expect(kept.map((r) => r.offer.id)).toEqual([1, 2, 3, 4]);
+    expect(excluded).toBe(1);
+  });
+
+  test("drops absurdly cheap listings too", () => {
+    // Median 1.2 → floor 0.4; $0.05 is a data error, not a rentable price.
+    const { kept, excluded } = fenceOffers([
+      offer({ id: 1, dph_total: 0.05 }),
+      offer({ id: 2, dph_total: 1.1 }),
+      offer({ id: 3, dph_total: 1.2 }),
+      offer({ id: 4, dph_total: 1.3 }),
+    ]);
+    expect(kept.map((r) => r.offer.id)).toEqual([2, 3, 4]);
+    expect(excluded).toBe(1);
+  });
+
+  test("keeps the legitimate 2-3× spread of a real rental market", () => {
+    // A cheap community rig at 0.3 and a verified DC box at 1.4 around a
+    // median of ~0.5 are all real — none may be fenced.
+    const { kept, excluded } = fenceOffers([
+      offer({ id: 1, dph_total: 0.3 }),
+      offer({ id: 2, dph_total: 0.45 }),
+      offer({ id: 3, dph_total: 0.5 }),
+      offer({ id: 4, dph_total: 0.7 }),
+      offer({ id: 5, dph_total: 1.4 }),
+    ]);
+    expect(kept).toHaveLength(5);
+    expect(excluded).toBe(0);
+  });
+
+  test("excludes deverified hosts before the median is computed", () => {
+    // Two junk deverified listings at 9 must not drag the median upward and
+    // shield each other from the fence.
+    const { kept, excluded } = fenceOffers([
+      offer({ id: 1, dph_total: 1 }),
+      offer({ id: 2, dph_total: 1.2 }),
+      offer({ id: 3, dph_total: 9, verification: "deverified" }),
+      offer({ id: 4, dph_total: 9, verification: "deverified" }),
+    ]);
+    expect(kept.map((r) => r.offer.id)).toEqual([1, 2]);
+    expect(excluded).toBe(2);
+  });
+
+  test("fence bounds are inclusive", () => {
+    // Median 1 → bounds exactly [1/3, 3].
+    const { kept } = fenceOffers([
+      offer({ id: 1, dph_total: 1 / FENCE_FACTOR }),
+      offer({ id: 2, dph_total: 1 }),
+      offer({ id: 3, dph_total: FENCE_FACTOR }),
+    ]);
+    expect(kept).toHaveLength(3);
+  });
+
+  test("unpriceable offers are ignored, not counted as excluded", () => {
+    const { kept, excluded } = fenceOffers([
+      offer({ id: 1, dph_total: 1 }),
+      offer({ id: 2, dph_total: null }),
+      offer({ id: 3, dph_total: 0 }),
+    ]);
+    expect(kept).toHaveLength(1);
+    expect(excluded).toBe(0);
+  });
+
+  test("an empty or all-junk book fences to empty without dividing by zero", () => {
+    expect(fenceOffers([])).toEqual({ kept: [], excluded: 0 });
+    const { kept, excluded } = fenceOffers([offer({ id: 1, dph_total: 5, verification: "deverified" })]);
+    expect(kept).toHaveLength(0);
+    expect(excluded).toBe(1);
+  });
+});
+
 describe("summarizeOffers", () => {
   const offers: VastOffer[] = [
     offer({ id: 1, dph_total: 8, num_gpus: 8, min_bid: 4, verification: "verified" }), // $1.00/gpu
     offer({ id: 2, dph_total: 4, num_gpus: 2, min_bid: 2, verification: "unverified" }), // $2.00/gpu
     offer({ id: 3, dph_total: 3, num_gpus: 1, verification: "verified" }), // $3.00/gpu
-    offer({ id: 4, dph_total: 4, num_gpus: 1, verification: "deverified" }), // $4.00/gpu
+    offer({ id: 4, dph_total: 4, num_gpus: 1, verification: "unverified" }), // $4.00/gpu
   ];
 
   test("builds the full band in USD per GPU-hour", () => {
@@ -121,6 +204,22 @@ describe("summarizeOffers", () => {
     expect(s.offers).toBe(4);
     expect(s.gpusAvailable).toBe(12);
     expect(s.minUsd).toBe(1);
+  });
+
+  test("a fenced-out listing contributes nothing: no depth, no bid, no max", () => {
+    // Per-GPU prices [1,2,3,4,90], median 3 → fence [1, 9] → the 90 goes.
+    const junk = offer({ id: 9, dph_total: 90, num_gpus: 1, min_bid: 0.01, verification: "verified" });
+    const s = summarizeOffers("B200", [...offers, junk]);
+    expect(s.offers).toBe(4);
+    expect(s.excludedOffers).toBe(1);
+    expect(s.maxUsd).toBe(4); // not 90
+    expect(s.gpusAvailable).toBe(12); // not 13
+    expect(s.minBidUsd).toBe(0.5); // junk's 0.01 bid is dead with its listing
+    expect(s.verifiedOffers).toBe(2); // junk was "verified" but fenced
+  });
+
+  test("clean books report zero excluded", () => {
+    expect(summarizeOffers("B200", offers).excludedOffers).toBe(0);
   });
 
   test("an empty book yields nulls, never NaN", () => {

@@ -34,14 +34,24 @@ driving them down.
 
 16 accelerators are tracked — B200, B300, H200/H200 NVL, the H100 family, A100,
 L40S, RTX PRO 6000, RTX 5090/4090/3090, T4 — and every one's **full** offer book
-is swept each pass. vast.ai quotes whole machines, so all prices are normalized
-to **USD per GPU‑hour** (an 8×B200 box at $85/hr is $10.63/GPU‑hr).
+is swept **every 15 minutes** (`INGEST_GPU_INTERVAL_MS`), on a clock decoupled
+from the hourly OpenRouter pass. vast.ai quotes whole machines, so all prices
+are normalized to **USD per GPU‑hour** (an 8×B200 box at $85/hr is
+$10.63/GPU‑hr).
+
+Prices describe the **practical rentable market**, not the raw listing feed:
+listings from deverified hosts, and listings priced more than 3× either side of
+the sweep median — parked asks nobody rents (a $53/GPU‑hr RTX 5090 against a
+$0.49 median, a $12 T4 against $0.15) — are fenced out before any statistic is
+computed, and the excluded count is stored per sweep.
 
 Each sweep stores a percentile **band** rather than one number, because the
 rental market is thin and bimodal: min (the floor you can actually rent at), p25,
-median, p75, max, a supply‑weighted mean, the cheapest interruptible bid, and the
-same for the "verified host" subset — plus offer count and GPUs available as a
-measure of depth.
+median, p75, the cheapest interruptible bid, the "verified host" subset's floor
+and median — plus offer count and GPUs available as a measure of depth. The
+sub‑hourly cadence is what powers the intraday views: a 72‑hour tape of every
+sweep, and an hour‑of‑day profile showing how GPU floors, supply depth and token
+prices each behave across a UTC day.
 
 Two quirks of the vast.ai API worth knowing: responses are hard‑capped at **64
 offers** regardless of `limit` and `offset` is ignored, so the client pages
@@ -109,7 +119,9 @@ All endpoints are JSON, CORS‑enabled, served under `/api` by nginx.
 | `GET /providers` | per‑provider rollup (model count, cheapest/avg $/Mtok) |
 | `GET /apps`, `GET /usage/weekly` | cached ranking blobs |
 | `GET /gpu` | curated accelerator list, each with its latest vast.ai price band |
-| `GET /gpu/series?gpu=B200&days=30` | GPU rental price bands over time (omit `gpu` for all) |
+| `GET /gpu/series?gpu=B200&days=30` | per-sweep GPU price bands (omit `gpu` for all; sub-hourly) |
+| `GET /gpu/daily?gpu=B200&days=60` | UTC-day aggregates, rolled up in SQL |
+| `GET /market/snapshots?days=14` | hourly market snapshots — the token side's intraday series |
 
 ## Local development
 
