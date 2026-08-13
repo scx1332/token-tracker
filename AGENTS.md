@@ -48,8 +48,10 @@ docker compose up -d --build                    # full stack (or ./deploy.sh)
   non‑UTC server timezone can't shift usage bucket dates.
 - **Keep tests hermetic.** `bun test` must pass with no DB and no network;
   storage/server tests skip unless `TEST_DATABASE_URL` (or `DATABASE_URL`) is set.
-- **Spend is an estimate** (tokens × current price). OpenRouter has no
-  total‑revenue endpoint; never present spend as billed revenue.
+- **Spend is an estimate** (tokens × observed effective rates where the daily
+  sweep has them — these embed cache discounts — with list price as fallback).
+  OpenRouter has no total‑revenue endpoint; never present spend as billed
+  revenue.
 
 ## Implementation Notes
 
@@ -65,6 +67,11 @@ docker compose up -d --build                    # full stack (or ./deploy.sh)
 - `src/ingest.ts` — one pass: catalog + model prices → provider prices →
   usage → market snapshot. `src/ingestLoop.ts` loops + runs a one‑time backfill.
 - `src/server.ts` — `Bun.serve` JSON API with CORS. Entry: `src/serve.ts`.
+  `/model/provider-prices?id=` returns the full per‑provider price change‑log plus
+  the provider list; the frontend (`frontend/src/price.ts`, pure + unit‑tested)
+  reconstructs the min‑across‑providers envelope and each provider's step series
+  from it for the Price Explorer. No historical price backfill exists, so this
+  series starts sparse and fills in hourly as prices actually change.
 - `src/frontier.ts` — curated frontier families to always surface (mirrored in
   `frontend/src/frontier.ts`).
 

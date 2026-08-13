@@ -34,6 +34,12 @@ export interface ModelWithLatest {
   providerCount: number;
 }
 
+export interface PriceIndexPoint {
+  date: string;
+  weightedUsdPerMtok: number | null;
+  medianUsdPerMtok: number | null;
+}
+
 export interface MarketRow {
   capturedAt: string;
   totalModels: number;
@@ -72,18 +78,44 @@ export interface AppUsage {
   rank: number | null;
 }
 
+export interface AppSpendRow {
+  appId: number | null;
+  title: string;
+  url: string | null;
+  spendUsd: number;
+  tokens: number;
+  topModels: string[];
+}
+
 export interface WeeklyPoint {
   date: string;
   tokensByPermaslug: Record<string, number>;
 }
 
+export interface RacePoint {
+  date: string;
+  spendByModel: Record<string, number>;
+  tokensByModel: Record<string, number>;
+}
+
 export interface MarketResponse {
   latest: MarketRow | null;
   series: UsageSeriesPoint[];
-  snapshots: MarketRow[];
+  priceIndex: PriceIndexPoint[];
   topModels: TopModel[];
   apps: { day: AppUsage[]; week: AppUsage[]; month: AppUsage[] };
+  /** Est. per-app spend (tokens priced per model) — null until first ingest. */
+  appsSpend: {
+    updatedAt: string;
+    windowDays: number;
+    modelsSwept: number;
+    apps: AppSpendRow[];
+  } | null;
   weekly: { points: WeeklyPoint[]; updatedAt?: string };
+  /** Full-week per-model spend/tokens from our own daily snapshots. */
+  race: { points: RacePoint[] };
+  /** Effective $/token per permaslug — prices the weekly race by est. spend. */
+  ratesByPermaslug?: Record<string, number>;
 }
 
 export interface PriceHistoryRow {
@@ -111,6 +143,7 @@ export interface UsageRow {
   completionTokens: number | null;
   requests: number | null;
   estimatedSpendUsd: number | null;
+  reasoningTokens: number | null;
 }
 
 export interface ModelDetail {
@@ -118,6 +151,47 @@ export interface ModelDetail {
   priceHistory: PriceHistoryRow[];
   providerPrices: PriceHistoryRow[];
   usage: UsageRow[];
+}
+
+export interface ProviderVolumeRow {
+  provider: string;
+  requestCount: number;
+  p50Throughput: number | null;
+  p50Latency: number | null;
+}
+
+export interface ProviderVolumeResponse {
+  model: string;
+  /** Trailing window the request counts cover (≈30 min). */
+  windowMinutes: number | null;
+  providers: ProviderVolumeRow[];
+}
+
+export interface ProviderPricesResponse {
+  model: string;
+  providers: string[];
+  points: PriceHistoryRow[];
+}
+
+export interface ProviderRevenuePoint {
+  provider: string;
+  bucketDate: string;
+  spendUsd: number | null;
+  tokens: number | null;
+  models: number;
+}
+
+export interface ProviderModelTotal {
+  provider: string;
+  modelId: string;
+  name: string;
+  spendUsd: number | null;
+  tokens: number | null;
+}
+
+export interface ProvidersMarketResponse {
+  series: ProviderRevenuePoint[];
+  models: ProviderModelTotal[];
 }
 
 export interface ProviderStat {
@@ -173,5 +247,9 @@ export const api = {
   },
   featured: (limit = 16) => get<{ models: ModelWithLatest[] }>(`/models/featured?limit=${limit}`),
   model: (id: string, days = 180) => get<ModelDetail>(`/model?id=${encodeURIComponent(id)}&days=${days}`),
+  providerPrices: (id: string, days = 365) =>
+    get<ProviderPricesResponse>(`/model/provider-prices?id=${encodeURIComponent(id)}&days=${days}`),
+  providerVolume: (id: string) => get<ProviderVolumeResponse>(`/model/provider-volume?id=${encodeURIComponent(id)}`),
   providers: () => get<{ providers: ProviderStat[] }>("/providers"),
+  providersMarket: (days = 90) => get<ProvidersMarketResponse>(`/providers/market?days=${days}`),
 };

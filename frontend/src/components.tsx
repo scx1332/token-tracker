@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { Sparkline } from "./charts";
-import { compact, pct } from "./format";
+import { pct } from "./format";
 
 export function Panel({ children, className = "", pad = false }: { children: ReactNode; className?: string; pad?: boolean }) {
   return <div className={`panel ${pad ? "panel-pad" : ""} ${className}`}>{children}</div>;
@@ -63,7 +63,9 @@ export function Badge({ kind, children }: { kind: "free" | "frontier" | "promo" 
 export function Loading({ label = "Loading market data…" }: { label?: string }) {
   return (
     <div className="loading">
-      <div className="spinner" />
+      <div className="loading-bar" aria-hidden="true">
+        <span />
+      </div>
       {label}
     </div>
   );
@@ -127,34 +129,12 @@ export function RankList({ items, onNavigate }: { items: RankItem[]; onNavigate?
   );
 }
 
-export interface TickerItem {
-  sym: string;
-  price: string;
-  volume: number | null;
-  free: boolean;
-}
-
-export function Ticker({ items, onPick }: { items: TickerItem[]; onPick?: (sym: string) => void }) {
-  if (items.length === 0) return null;
-  const doubled = [...items, ...items];
+/** A compact, static field:value readout for the status strip. */
+export function Stat({ k, v, tone }: { k: string; v: ReactNode; tone?: "teal" | "amber" }) {
   return (
-    <div className="ticker" aria-label="Frontier model price tape">
-      <div className="ticker-track">
-        {doubled.map((it, i) => (
-          <span
-            key={i}
-            className="tick"
-            style={onPick ? { cursor: "pointer" } : undefined}
-            onClick={onPick ? () => onPick(it.sym) : undefined}
-          >
-            <span className="tick-sym">{it.sym}</span>
-            <span className="tick-px val-gold">{it.price}</span>
-            <span className={`tick-delta ${it.free ? "up" : ""}`} style={{ color: it.free ? undefined : "var(--cyan)" }}>
-              {it.free ? "FREE" : `${compact(it.volume)}·tok`}
-            </span>
-          </span>
-        ))}
-      </div>
-    </div>
+    <span className="stat">
+      <span className="stat-k">{k}</span>
+      <span className={`stat-v mono${tone ? ` val-${tone === "teal" ? "cyan" : "gold"}` : ""}`}>{v}</span>
+    </span>
   );
 }

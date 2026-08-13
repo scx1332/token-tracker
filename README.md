@@ -54,9 +54,13 @@ estimated spend is computed from the model's current price.
 - **Backend** (`src/`): Bun + TypeScript + `pg`. `ingest` (hourly worker),
   `serve` (HTTP API), `backfill` (one‑shot deep history). Idempotent schema with a
   per‑schema advisory lock so `ingest` and `backend` can create it concurrently.
-- **Frontend** (`frontend/`): Vite + React 18 + Plotly. A market terminal —
-  dollars are gold, tokens are cyan, numbers are monospace. Served in production by
-  `server.js` (static files + `/api` proxy).
+- **Frontend** (`frontend/`): Vite + React 18 + Plotly, styled as a light,
+  technical analytics workstation (Archivo + IBM Plex Mono; teal = tokens, amber =
+  dollars, indigo = price). The **Price Explorer** lets you pick any model and
+  follow its price across every provider over time — the bold line is the
+  cheapest provider (the *minimum*), inside the min–max spread band, with a live
+  per-provider "order book" you can click to pin one company. Served in production
+  by `server.js` (static files + `/api` proxy).
 - **Deploy**: `docker compose` (postgres + ingest + backend + frontend, all bound
   to `127.0.0.1`), fronted by the host nginx with a Let's Encrypt cert.
 
@@ -71,6 +75,7 @@ All endpoints are JSON, CORS‑enabled, served under `/api` by nginx.
 | `GET /models?search=&author=&limit=` | all models with latest price + latest usage |
 | `GET /models/featured?limit=16` | frontier‑pinned + top‑by‑usage |
 | `GET /model?id=<id>&days=180` | model + model‑level price history + per‑provider prices + usage |
+| `GET /model/provider-prices?id=<id>&days=365` | full per‑provider price change‑log + provider list — drives the Price Explorer's min‑envelope and order book |
 | `GET /prices?model=<id>&provider=<p>` | price history |
 | `GET /usage?model=<id>` | usage history |
 | `GET /providers` | per‑provider rollup (model count, cheapest/avg $/Mtok) |

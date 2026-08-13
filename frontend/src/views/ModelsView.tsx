@@ -17,7 +17,7 @@ export function ModelsView({ navigate }: { navigate: (to: string) => void }) {
   const [query, setQuery] = useState(initialQuery);
   const [onlyPaid, setOnlyPaid] = useState(false);
   const [onlyFrontier, setOnlyFrontier] = useState(false);
-  const [sort, setSort] = useState<SortKey>("tokens");
+  const [sort, setSort] = useState<SortKey>("spend");
   const [dir, setDir] = useState<1 | -1>(-1);
 
   useEffect(() => {
@@ -105,8 +105,8 @@ export function ModelsView({ navigate }: { navigate: (to: string) => void }) {
               <th className="left" onClick={() => clickSort("name")}>Model {arrow("name")}</th>
               <th onClick={() => clickSort("input")}>Input $/M {arrow("input")}</th>
               <th onClick={() => clickSort("output")}>Output $/M {arrow("output")}</th>
-              <th onClick={() => clickSort("tokens")}>Daily tokens {arrow("tokens")}</th>
               <th onClick={() => clickSort("spend")}>Est. spend/day {arrow("spend")}</th>
+              <th onClick={() => clickSort("tokens")}>Daily tokens {arrow("tokens")}</th>
               <th onClick={() => clickSort("providers")}>Providers {arrow("providers")}</th>
             </tr>
           </thead>
@@ -126,8 +126,8 @@ export function ModelsView({ navigate }: { navigate: (to: string) => void }) {
                 </td>
                 <td className="val-cyan">{m.isFree ? "$0" : perMtok(m.promptUsd)}</td>
                 <td className="val-gold">{m.isFree ? "$0" : perMtok(m.completionUsd)}</td>
-                <td>{compact(m.latestTokens)}</td>
                 <td className="val-gold">{usd(m.latestSpendUsd)}</td>
+                <td>{compact(m.latestTokens)}</td>
                 <td style={{ color: "var(--muted)" }}>{m.providerCount || "—"}</td>
               </tr>
             ))}

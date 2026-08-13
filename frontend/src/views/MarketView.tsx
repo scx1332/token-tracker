@@ -1,13 +1,19 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { api, type HealthResponse, type MarketResponse } from "../api";
 import { Kpi, Panel, SectionHead, RankList, Loading, ErrorNote, type RankItem } from "../components";
-import { SpendTokensChart, PriceIndexChart, WeeklyRaceChart, C } from "../charts";
-import { usd, usdExact, compact, mtok, relTime, seriesChange, displayName } from "../format";
+import { SpendTokensChart, PriceIndexChart, WeeklyBarsChart, WeeklyRaceChart, C } from "../charts";
+import { usd, usdExact, compact, mtok, relTime, seriesChange, displayName, pct } from "../format";
+import { forecastCurrentWeek, toWeeklyBuckets, trimLeadingPartial } from "../weekly";
 
 export function MarketView({ navigate }: { navigate: (to: string) => void }) {
   const [market, setMarket] = useState<MarketResponse | null>(null);
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Price × volume is the market-share signal that matters, so spend leads.
+  const [raceMode, setRaceMode] = useState<"spend" | "tokens">("spend");
+  const [weekMode, setWeekMode] = useState<"spend" | "tokens" | "both">("both");
+  // The race starts Jun 15 2026 — earlier history is noise for today's field.
+  const RACE_SINCE = "2026-06-15";
 
   useEffect(() => {
     let alive = true;
@@ -23,6 +29,18 @@ export function MarketView({ navigate }: { navigate: (to: string) => void }) {
     };
   }, []);
 
+  // Mon–Sun totals of the same daily series (hooks must run before any return).
+  // The oldest bucket is short only because coverage starts mid-week, so it goes.
+  const weeks = useMemo(() => trimLeadingPartial(toWeeklyBuckets(market?.series ?? [])), [market]);
+  const forecast = useMemo(() => {
+    const series = market?.series ?? [];
+    const now = Date.now();
+    return {
+      spend: forecastCurrentWeek(series, "spend", now),
+      tokens: forecastCurrentWeek(series, "tokens", now),
+    };
+  }, [market]);
+
   if (error) return <ErrorNote error={error} />;
   if (!market) return <Loading />;
 
@@ -30,7 +48,38 @@ export function MarketView({ navigate }: { navigate: (to: string) => void }) {
   const series = market.series;
   const spendSeries = series.map((s) => s.totalSpendUsd);
   const tokenSeries = series.map((s) => s.totalTokens);
-  const weightedSeries = market.snapshots.map((s) => s.usageWeightedPromptUsdPerMtok);
+  const weightedSeries = market.priceIndex.map((s) => s.weightedUsdPerMtok);
+
+  // Week-over-week reads off the last two COMPLETE weeks — the running week is
+  // always short and would fake a crash.
+  const fullWeeks = weeks.filter((w) => w.complete);
+  const lastFullWeek = fullWeeks[fullWeeks.length - 1] ?? null;
+  const prevFullWeek = fullWeeks[fullWeeks.length - 2] ?? null;
+  // Tokens-only reads tokens; spend and the dual view both headline dollars.
+  const weekMetric: "spend" | "tokens" = weekMode === "tokens" ? "tokens" : "spend";
+  const weekForecast = weekMetric === "spend" ? forecast.spend : forecast.tokens;
+  const weekFmt = (v: number | null) =>
+    v === null ? "—" : weekMetric === "spend" ? usd(v) : `${compact(v)} tok`;
+  const weekValue = (w: typeof lastFullWeek) => (w ? (weekMetric === "spend" ? w.spendUsd : w.tokens) : null);
+
+  // The footnote reports whatever the chart is showing — both series in "Both".
+  const reportedForecasts = (weekMode === "both" ? (["spend", "tokens"] as const) : ([weekMetric] as const))
+    .map((metric) => {
+      const f = metric === "spend" ? forecast.spend : forecast.tokens;
+      if (!f) return null;
+      const base = lastFullWeek ? (metric === "spend" ? lastFullWeek.spendUsd : lastFullWeek.tokens) : null;
+      return {
+        metric,
+        label: metric === "spend" ? usd(f.projected) : `${compact(f.projected)} tok`,
+        change: base && base > 0 ? f.projected / base - 1 : null,
+      };
+    })
+    .filter((f): f is { metric: "spend" | "tokens"; label: string; change: number | null } => f !== null);
+  const prevValue = weekValue(prevFullWeek);
+  const weekOverWeek =
+    prevValue && prevValue > 0 && weekValue(lastFullWeek) !== null
+      ? (weekValue(lastFullWeek)! - prevValue) / prevValue
+      : null;
 
   const priceIndexChange = seriesChange(weightedSeries);
   const spendChange = seriesChange(spendSeries.slice(-14));
@@ -40,29 +89,44 @@ export function MarketView({ navigate }: { navigate: (to: string) => void }) {
   const weighted = latest?.usageWeightedPromptUsdPerMtok ?? null;
   const cheapest = latest?.cheapestFrontierUsdPerMtok ?? null;
 
+  // Ranked by est. spend (price × tokens) — free-token volume alone doesn't move money.
   const topModelItems: RankItem[] = market.topModels.slice(0, 10).map((m) => {
-    const max = market.topModels[0]?.tokens ?? 1;
+    const max = market.topModels[0]?.spendUsd ?? 1;
     return {
       name: displayName(m.name),
-      value: m.tokens,
-      valueLabel: `${compact(m.tokens)} · ${usd(m.spendUsd)}`,
-      frac: (m.tokens ?? 0) / (max || 1),
+      value: m.spendUsd,
+      valueLabel: `${usd(m.spendUsd)} · ${compact(m.tokens)} tok`,
+      frac: (m.spendUsd ?? 0) / (max || 1),
       href: `#/model/${encodeURIComponent(m.modelId)}`,
-      color: C.cyan,
-    };
-  });
-
-  const apps = market.apps.month.length ? market.apps.month : market.apps.week;
-  const appItems: RankItem[] = apps.slice(0, 10).map((a) => {
-    const max = apps[0]?.tokens ?? 1;
-    return {
-      name: a.title,
-      value: a.tokens,
-      valueLabel: `${compact(a.tokens)} tok`,
-      frac: (a.tokens ?? 0) / (max || 1),
       color: C.gold,
     };
   });
+
+  // Per-app spend is assembled from per-model app leaderboards (OpenRouter
+  // publishes no direct per-app dollars); fall back to token ranking until
+  // the first ingest sweep lands.
+  const spendApps = market.appsSpend?.apps ?? [];
+  const appItems: RankItem[] = spendApps.length
+    ? spendApps.slice(0, 10).map((a) => {
+        const max = spendApps[0]?.spendUsd ?? 1;
+        return {
+          name: a.title,
+          value: a.spendUsd,
+          valueLabel: `${usd(a.spendUsd)} · ${compact(a.tokens)} tok`,
+          frac: (a.spendUsd ?? 0) / (max || 1),
+          color: C.gold,
+        };
+      })
+    : (market.apps.month.length ? market.apps.month : market.apps.week).slice(0, 10).map((a, _i, list) => ({
+        name: a.title,
+        value: a.tokens,
+        valueLabel: `${compact(a.tokens)} tok`,
+        frac: (a.tokens ?? 0) / ((list[0]?.tokens ?? 1) || 1),
+        color: C.gold,
+      }));
+  const appsNote = spendApps.length
+    ? `by est. spend — app tokens priced per model, top ${market.appsSpend?.modelsSwept ?? 0} paid models`
+    : "by tokens routed — spend estimate builds after next sync";
 
   // "Crash radar": is the usage-weighted price falling and spend still climbing?
   const priceFalling = priceIndexChange !== null && priceIndexChange < -0.01;
@@ -77,17 +141,17 @@ export function MarketView({ navigate }: { navigate: (to: string) => void }) {
       {/* Hero */}
       <section className="hero">
         <Panel className="hero-lead">
-          <div className="crash-flag" style={{ marginBottom: 18 }}>
-            <span className="pulse" style={{ background: flag.color }} />
+          <div className="signal" style={{ marginBottom: 18 }}>
+            <span className="sig-dot" style={{ background: flag.color }} />
             {flag.label}
           </div>
           <h1>
-            The price of <span className="c">thinking</span>, <span className="g">quoted live.</span>
+            What the world pays for <span className="c">AI inference</span>.
           </h1>
           <p>
-            Every hour we scrape OpenRouter's public order book — {latest?.activeModels ?? "—"} live models across{" "}
-            {health?.coverage.pricePoints ?? "—"} price points — to chart what the world pays to run frontier AI, and
-            where the next repricing is coming from.
+            Every hour this tool scrapes OpenRouter's public pricing and usage — {latest?.activeModels ?? "—"} live
+            models across {health?.coverage.pricePoints ?? "—"} price points — to measure spend, throughput, and where
+            prices are moving across the model market.
           </p>
           <div className="hero-meta">
             <div className="hm">
@@ -108,7 +172,7 @@ export function MarketView({ navigate }: { navigate: (to: string) => void }) {
           <div className="chart-head">
             <div>
               <div className="chart-title">Estimated daily spend &amp; throughput</div>
-              <div className="chart-note">tokens × current price · last 120 days</div>
+              <div className="chart-note">tokens × effective paid rate · last 120 days</div>
             </div>
             <div className="legend">
               <span>
@@ -122,6 +186,74 @@ export function MarketView({ navigate }: { navigate: (to: string) => void }) {
           <SpendTokensChart series={series} height={268} />
         </Panel>
       </section>
+
+      {/* Weekly bars — the same money, resampled Mon–Sun so the trend shows */}
+      <Panel className="chart-card">
+        <div className="chart-head">
+          <div>
+            <div className="chart-title">
+              Weekly {weekMode === "both" ? "spend & tokens" : weekMode === "spend" ? "spend" : "tokens"} · Mon–Sun
+            </div>
+            <div className="chart-note mono">
+              {weekMode === "tokens"
+                ? "tokens/week"
+                : weekMode === "spend"
+                  ? "est. $/week"
+                  : "est. $/week (left axis) · tokens/week (right axis)"}
+              {lastFullWeek ? ` · last full week ${weekFmt(weekValue(lastFullWeek))}` : ""}
+              {weekOverWeek !== null ? ` (${pct(weekOverWeek)} w/w)` : ""}
+            </div>
+          </div>
+          <div className="seg seg-sm">
+            <button className={weekMode === "spend" ? "active" : ""} onClick={() => setWeekMode("spend")}>
+              Est. spend
+            </button>
+            <button className={weekMode === "tokens" ? "active" : ""} onClick={() => setWeekMode("tokens")}>
+              Tokens
+            </button>
+            <button className={weekMode === "both" ? "active" : ""} onClick={() => setWeekMode("both")}>
+              Both
+            </button>
+          </div>
+        </div>
+        {weeks.length > 1 ? (
+          <WeeklyBarsChart
+            weeks={weeks}
+            mode={weekMode}
+            projected={{ spend: forecast.spend?.projected ?? null, tokens: forecast.tokens?.projected ?? null }}
+            height={272}
+          />
+        ) : (
+          <div className="empty">Not enough history for a weekly view yet.</div>
+        )}
+        {weekForecast ? (
+          <div className="forecast-note">
+            <div className="fc-head">
+              <span className="fc-swatch" />
+              <span>
+                Week of {weekForecast.weekStart} tracking to{" "}
+                {reportedForecasts.map((f, i) => (
+                  <span key={f.metric}>
+                    {i > 0 ? " · " : ""}
+                    <b>{f.label}</b>
+                    {f.change !== null ? <span className={f.change >= 0 ? "up" : "down"}> {pct(f.change)}</span> : null}
+                  </span>
+                ))}{" "}
+                vs last full week
+              </span>
+            </div>
+            <div className="fc-method mono">
+              {weekFmt(weekForecast.observed)} booked over {weekForecast.daysCovered} day
+              {weekForecast.daysCovered === 1 ? "" : "s"} ÷ {(weekForecast.covered * 100).toFixed(0)}% — the share of a
+              normal week those weekdays carry, averaged over the last {weekForecast.basisWeeks} complete weeks
+              {weekForecast.weekendRatio !== null
+                ? ` (a weekend day runs ${Math.round((1 - weekForecast.weekendRatio) * 100)}% below a weekday, so the days still to come are not counted flat)`
+                : ""}
+              . {weekForecast.partialToday ? "Today is credited pro-rata to the hour it has reached (UTC)." : "OpenRouter publishes complete days only, so today is not booked yet and rides entirely on the projection."}
+            </div>
+          </div>
+        ) : null}
+      </Panel>
 
       {/* KPI row */}
       <div className="grid kpis" style={{ marginTop: 16 }}>
@@ -174,7 +306,7 @@ export function MarketView({ navigate }: { navigate: (to: string) => void }) {
           <div className="chart-head">
             <div>
               <div className="chart-title">Price index over time</div>
-              <div className="chart-note">usage-weighted vs median input $/Mtok</div>
+              <div className="chart-note">usage-weighted vs median input $/Mtok · daily close</div>
             </div>
             <div className="legend">
               <span>
@@ -185,11 +317,11 @@ export function MarketView({ navigate }: { navigate: (to: string) => void }) {
               </span>
             </div>
           </div>
-          {market.snapshots.length > 1 ? (
-            <PriceIndexChart snapshots={market.snapshots} height={240} />
+          {market.priceIndex.length > 1 ? (
+            <PriceIndexChart rows={market.priceIndex} height={240} />
           ) : (
             <div className="empty" style={{ padding: "40px 10px" }}>
-              Price-index history builds as hourly snapshots accumulate.
+              Price-index history builds one point per day — check back tomorrow.
             </div>
           )}
         </Panel>
@@ -197,11 +329,26 @@ export function MarketView({ navigate }: { navigate: (to: string) => void }) {
           <div className="chart-head">
             <div>
               <div className="chart-title">The model race</div>
-              <div className="chart-note">weekly tokens · top models · 1 year</div>
+              <div className="chart-note">
+                {raceMode === "spend" ? "weekly est. spend" : "weekly tokens"} · full weeks · top 10 · since Jun 15
+              </div>
+            </div>
+            <div className="seg seg-sm">
+              <button className={raceMode === "spend" ? "active" : ""} onClick={() => setRaceMode("spend")}>
+                Est. spend
+              </button>
+              <button className={raceMode === "tokens" ? "active" : ""} onClick={() => setRaceMode("tokens")}>
+                Tokens
+              </button>
             </div>
           </div>
-          {market.weekly.points.length > 1 ? (
-            <WeeklyRaceChart points={market.weekly.points} height={240} />
+          {market.race.points.filter((p) => p.date >= RACE_SINCE).length > 1 ? (
+            <WeeklyRaceChart
+              points={market.race.points.filter((p) => p.date >= RACE_SINCE)}
+              height={300}
+              topN={10}
+              mode={raceMode}
+            />
           ) : (
             <div className="empty" style={{ padding: "40px 10px" }}>No weekly history yet.</div>
           )}
@@ -214,14 +361,14 @@ export function MarketView({ navigate }: { navigate: (to: string) => void }) {
         <Panel className="panel-pad">
           <div className="chart-head">
             <div className="chart-title">Top models · today</div>
-            <div className="chart-note">by daily tokens</div>
+            <div className="chart-note">by est. daily spend (tokens × effective rate)</div>
           </div>
           <RankList items={topModelItems} onNavigate={navigate} />
         </Panel>
         <Panel className="panel-pad">
           <div className="chart-head">
             <div className="chart-title">Top apps · 30 days</div>
-            <div className="chart-note">by tokens routed</div>
+            <div className="chart-note">{appsNote}</div>
           </div>
           {appItems.length ? <RankList items={appItems} /> : <div className="empty">No app data.</div>}
         </Panel>

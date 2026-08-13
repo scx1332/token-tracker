@@ -27,6 +27,61 @@ export interface AppUsage {
   rank: number | null;
 }
 
+export interface EndpointVolumeRow {
+  provider: string;
+  requestCount: number;
+  windowMinutes: number | null;
+  p50Throughput: number | null;
+  p50Latency: number | null;
+}
+
+/**
+ * Parse `stats/endpoint` into per-provider volume rows. Request counts cover a
+ * trailing ~30-minute window — the only public per-provider volume signal.
+ * One provider can run several endpoints (regions/quantizations): counts are
+ * summed, the busiest endpoint's latency/throughput kept.
+ */
+export function parseEndpointStats(raw: unknown): EndpointVolumeRow[] {
+  const data = (raw as { data?: unknown })?.data;
+  if (!Array.isArray(data)) return [];
+  const byProvider = new Map<string, EndpointVolumeRow & { top: number }>();
+  for (const ep of data as any[]) {
+    const name = ep?.provider_display_name ?? ep?.provider_name;
+    const stats = ep?.stats;
+    if (!name || !stats) continue;
+    const count = Number(stats.request_count ?? 0);
+    if (!Number.isFinite(count) || count < 0) continue;
+    const cur =
+      byProvider.get(name) ??
+      ({ provider: String(name), requestCount: 0, windowMinutes: null, p50Throughput: null, p50Latency: null, top: -1 });
+    cur.requestCount += count;
+    cur.windowMinutes = cur.windowMinutes ?? toNum(stats.window_minutes);
+    if (count > cur.top) {
+      cur.top = count;
+      cur.p50Throughput = toNum(stats.p50_throughput);
+      cur.p50Latency = toNum(stats.p50_latency);
+    }
+    byProvider.set(name, cur);
+  }
+  return [...byProvider.values()]
+    .map(({ top: _top, ...row }) => row)
+    .sort((a, b) => b.requestCount - a.requestCount);
+}
+
+/** Live per-provider request volume for one model (`stats/endpoint`). */
+export async function fetchEndpointStats(
+  client: OpenRouterClient,
+  permaslug: string,
+  variant: string,
+  signal?: AbortSignal,
+): Promise<EndpointVolumeRow[]> {
+  const raw = await client.getFrontendJson(
+    `/api/frontend/v1/stats/endpoint?permaslug=${encodeURIComponent(permaslug)}&variant=${encodeURIComponent(variant)}`,
+    signal,
+  );
+  return parseEndpointStats(raw);
+}
+
 export interface EffectivePricing {
   weightedInputPerMtok: number | null;
   weightedOutputPerMtok: number | null;
@@ -104,19 +159,38 @@ export async function fetchApps(
   signal?: AbortSignal,
 ): Promise<{ day: AppUsage[]; week: AppUsage[]; month: AppUsage[] }> {
   const raw = await client.getFrontendJson<any>("/api/frontend/v1/rankings/apps", signal);
-  const parseList = (list: unknown): AppUsage[] =>
-    Array.isArray(list)
-      ? list.map((r: any) => ({
-          appId: toNum(r.app_id),
-          title: r.app?.title ?? r.app?.slug ?? "Unknown app",
-          url: r.app?.main_url ?? null,
-          tokens: toNum(r.total_tokens),
-          requests: toNum(r.total_requests),
-          rank: toNum(r.rank),
-        }))
-      : [];
   const data = raw?.data ?? {};
-  return { day: parseList(data.day), week: parseList(data.week), month: parseList(data.month) };
+  return { day: parseAppList(data.day), week: parseAppList(data.week), month: parseAppList(data.month) };
+}
+
+function parseAppList(list: unknown): AppUsage[] {
+  return Array.isArray(list)
+    ? list.map((r: any) => ({
+        appId: toNum(r.app_id),
+        title: r.app?.title ?? r.app?.slug ?? "Unknown app",
+        url: r.app?.main_url ?? r.app?.origin_url ?? null,
+        tokens: toNum(r.total_tokens),
+        requests: toNum(r.total_requests),
+        rank: toNum(r.rank),
+      }))
+    : [];
+}
+
+/**
+ * Top ~5 apps routing one model, trailing ~month window (shorter for models
+ * newer than that — totals cover the model's whole chart window).
+ */
+export async function fetchTopAppsForModel(
+  client: OpenRouterClient,
+  permaslug: string,
+  variant: string,
+  signal?: AbortSignal,
+): Promise<AppUsage[]> {
+  const raw = await client.getFrontendJson<any>(
+    `/api/frontend/v1/stats/top-apps-for-model?permaslug=${encodeURIComponent(permaslug)}&variant=${encodeURIComponent(variant)}`,
+    signal,
+  );
+  return parseAppList(raw?.data?.top_apps);
 }
 
 /** Usage-weighted effective prices ($/Mtok) and the provider list for a model. */

@@ -1,5 +1,5 @@
 import { test, expect, describe } from "bun:test";
-import { parseRankingsRecords } from "./usage";
+import { parseEndpointStats, parseRankingsRecords } from "./usage";
 
 describe("parseRankingsRecords", () => {
   const raw = {
@@ -48,5 +48,38 @@ describe("parseRankingsRecords", () => {
   test("empty / malformed input yields no rows", () => {
     expect(parseRankingsRecords(null)).toEqual([]);
     expect(parseRankingsRecords({})).toEqual([]);
+  });
+});
+
+describe("parseEndpointStats", () => {
+  const ep = (provider: string, count: number, thr: number, extra: object = {}) => ({
+    provider_display_name: provider,
+    stats: { request_count: count, window_minutes: 30, p50_throughput: thr, p50_latency: 1000 },
+    ...extra,
+  });
+
+  test("aggregates endpoints per provider, busiest first", () => {
+    const rows = parseEndpointStats({ data: [ep("A", 100, 20), ep("B", 500, 40), ep("A", 300, 55)] });
+    expect(rows.map((r) => r.provider)).toEqual(["B", "A"]);
+    expect(rows[1]!.requestCount).toBe(400); // 100 + 300 summed
+    expect(rows[1]!.p50Throughput).toBe(55); // busiest A endpoint wins
+    expect(rows[0]!.windowMinutes).toBe(30);
+  });
+
+  test("falls back to provider_name and skips stat-less endpoints", () => {
+    const rows = parseEndpointStats({
+      data: [
+        { provider_name: "C", stats: { request_count: 7 } },
+        { provider_display_name: "NoStats" },
+      ],
+    });
+    expect(rows).toEqual([
+      { provider: "C", requestCount: 7, windowMinutes: null, p50Throughput: null, p50Latency: null },
+    ]);
+  });
+
+  test("malformed input yields no rows", () => {
+    expect(parseEndpointStats(null)).toEqual([]);
+    expect(parseEndpointStats({ data: "nope" })).toEqual([]);
   });
 });

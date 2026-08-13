@@ -1,6 +1,9 @@
 import { Storage } from "./storage";
 import { readBuildInfo } from "./buildInfo";
 import { isFrontier } from "./frontier";
+import { buildRateByPermaslug } from "./market";
+import { fetchJson } from "./scraper";
+import { parseEndpointStats } from "./usage";
 
 export interface ServerOptions {
   port: number;
@@ -26,14 +29,23 @@ function sinceFromParams(params: URLSearchParams, defaultDays: number): string {
   return new Date(Date.now() - days * 86_400_000).toISOString();
 }
 
+/** Race window: ~13 full weeks of our own daily snapshots (coverage is ~90d). */
+function raceSince(): string {
+  return new Date(Date.now() - 13 * 7 * 86_400_000).toISOString().slice(0, 10);
+}
+
 function limitFromParams(params: URLSearchParams, def: number, max: number): number {
   const raw = params.get("limit");
   if (raw && /^\d+$/.test(raw)) return Math.min(Number(raw), max);
   return def;
 }
 
+const OPENROUTER_BASE = process.env.OPENROUTER_BASE_URL ?? "https://openrouter.ai";
+const VOLUME_CACHE_MS = 10 * 60_000;
+
 export function createServer(storage: Storage, options: ServerOptions) {
   const build = readBuildInfo();
+  const volumeCache = new Map<string, { at: number; body: unknown }>();
 
   async function handle(req: Request): Promise<Response> {
     if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS_HEADERS });
@@ -59,12 +71,30 @@ export function createServer(storage: Storage, options: ServerOptions) {
         return handleFeatured(q);
       case "/model":
         return handleModel(q);
+      case "/model/provider-prices":
+        return handleProviderPrices(q);
+      case "/model/provider-volume":
+        return handleProviderVolume(q);
+      case "/model/provider-volume/history":
+        return handleProviderVolumeHistory(q);
+      case "/model/effective-prices":
+        return handleEffectivePrices(q);
       case "/prices":
         return handlePrices(q);
       case "/usage":
         return handleUsage(q);
       case "/providers":
         return json({ providers: await storage.getProviderStats() });
+      case "/providers/revenue":
+        return json({ series: await storage.getProviderRevenueSeries({ since: sinceFromParams(q, 90) }) });
+      case "/providers/market": {
+        const since = sinceFromParams(q, 90);
+        const [series, models] = await Promise.all([
+          storage.getProviderRevenueSeries({ since }),
+          storage.getProviderModelTotals({ since }),
+        ]);
+        return json({ series, models });
+      }
       case "/apps":
         return handleKvJson("apps_ranking", { day: [], week: [], month: [] });
       case "/usage/weekly":
@@ -97,21 +127,29 @@ export function createServer(storage: Storage, options: ServerOptions) {
 
   async function handleMarket(q: URLSearchParams): Promise<Response> {
     const since = sinceFromParams(q, 120);
-    const [latest, series, snapshots, topModels, apps, weekly] = await Promise.all([
+    // Include delisted models: the 1-year weekly race references permaslugs that
+    // have since left the catalog, and their last known price still prices them.
+    const [latest, series, priceIndex, topModels, apps, appsSpend, weekly, allModels, race] = await Promise.all([
       storage.getLatestMarketSnapshot(),
       storage.getMarketUsageSeries({ since }),
-      storage.getMarketSnapshots({ since }),
+      storage.getDailyPriceIndex({ since }),
       storage.getTopModelsByUsage(15),
       readKvJson("apps_ranking"),
+      readKvJson("apps_spend"),
       readKvJson("weekly_chart"),
+      storage.getModelsWithLatest({ limit: 5000 }),
+      storage.getWeeklyModelRace({ since: raceSince() }),
     ]);
     return json({
       latest,
       series,
-      snapshots,
+      priceIndex,
       topModels,
       apps: apps ?? { day: [], week: [], month: [] },
+      appsSpend: appsSpend ?? null,
       weekly: weekly ?? { points: [] },
+      race: { points: race },
+      ratesByPermaslug: buildRateByPermaslug(allModels),
     });
   }
 
@@ -160,6 +198,59 @@ export function createServer(storage: Storage, options: ServerOptions) {
     return json({ model, priceHistory, providerPrices, usage });
   }
 
+  async function handleProviderPrices(q: URLSearchParams): Promise<Response> {
+    const id = q.get("id");
+    if (!id) return json({ error: "id is required" }, 400);
+    const since = sinceFromParams(q, 365);
+    const points = await storage.getProviderPriceHistory(id, { since });
+    const providers = [...new Set(points.map((p) => p.provider))].sort((a, b) => a.localeCompare(b));
+    return json({ model: id, providers, points });
+  }
+
+  /**
+   * Live per-provider traffic for one model, proxied from OpenRouter's
+   * `stats/endpoint` feed (request counts over a trailing ~30-minute window —
+   * the only public per-provider volume signal). Cached briefly so the
+   * explorer doesn't hammer OpenRouter.
+   */
+  async function handleProviderVolume(q: URLSearchParams): Promise<Response> {
+    const id = q.get("id");
+    if (!id) return json({ error: "id is required" }, 400);
+    const cached = volumeCache.get(id);
+    if (cached && Date.now() - cached.at < VOLUME_CACHE_MS) return json(cached.body);
+
+    const [model] = await storage.getModelsWithLatest({ modelId: id, limit: 1 });
+    if (!model) return json({ error: `Unknown model: ${id}` }, 404);
+    const permaslug = model.permaslug ?? model.canonicalSlug ?? model.modelId;
+    const variant = model.variant ?? "standard";
+    const url = `${OPENROUTER_BASE}/api/frontend/v1/stats/endpoint?permaslug=${encodeURIComponent(permaslug)}&variant=${encodeURIComponent(variant)}`;
+
+    let raw: unknown;
+    try {
+      raw = await fetchJson(url, { retries: 1, timeoutMs: 15_000, allowBrowserFallback: false });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return json({ model: id, windowMinutes: null, providers: [], error: message });
+    }
+
+    const rows = parseEndpointStats(raw);
+    const body = {
+      model: id,
+      windowMinutes: rows.find((r) => r.windowMinutes !== null)?.windowMinutes ?? null,
+      providers: rows.map(({ windowMinutes: _w, ...r }) => r),
+    };
+    volumeCache.set(id, { at: Date.now(), body });
+    return json(body);
+  }
+
+  /** Accumulated per-provider volume snapshots (captured hourly by the ingest). */
+  async function handleProviderVolumeHistory(q: URLSearchParams): Promise<Response> {
+    const id = q.get("id");
+    if (!id) return json({ error: "id is required" }, 400);
+    const rows = await storage.getProviderVolumeHistory(id, { since: sinceFromParams(q, 30) });
+    return json({ model: id, points: rows });
+  }
+
   async function handlePrices(q: URLSearchParams): Promise<Response> {
     const model = q.get("model");
     if (!model) return json({ error: "model is required" }, 400);
@@ -173,8 +264,20 @@ export function createServer(storage: Storage, options: ServerOptions) {
   async function handleUsage(q: URLSearchParams): Promise<Response> {
     const model = q.get("model");
     if (!model) return json({ error: "model is required" }, 400);
-    const usage = await storage.getUsageHistory(model, { since: sinceFromParams(q, 180) });
+    const filter: { since?: string; provider?: string } = { since: sinceFromParams(q, 180) };
+    // provider=slug serves that provider's daily tokens; default '' = model-level.
+    const provider = q.get("provider");
+    if (provider !== null) filter.provider = provider;
+    const usage = await storage.getUsageHistory(model, filter);
     return json({ model, usage });
+  }
+
+  /** Usage-weighted effective price history (daily sweep; '' = across providers). */
+  async function handleEffectivePrices(q: URLSearchParams): Promise<Response> {
+    const id = q.get("id");
+    if (!id) return json({ error: "id is required" }, 400);
+    const rows = await storage.getEffectivePriceHistory(id, { since: sinceFromParams(q, 90) });
+    return json({ model: id, points: rows });
   }
 
   async function readKvJson(key: string): Promise<unknown> {

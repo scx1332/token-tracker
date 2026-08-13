@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
-import { api, type ModelWithLatest } from "./api";
-import { Ticker, type TickerItem } from "./components";
-import { perMtok, displayName } from "./format";
+import { api, type HealthResponse } from "./api";
+import { Stat } from "./components";
+import { compact, relTime } from "./format";
 import { MarketView } from "./views/MarketView";
+import { ExplorerView } from "./views/ExplorerView";
 import { ModelsView } from "./views/ModelsView";
 import { ModelView } from "./views/ModelView";
 import { ProvidersView } from "./views/ProvidersView";
@@ -23,33 +24,16 @@ function useHashRoute(): [string, (to: string) => void] {
   return [hash, navigate];
 }
 
-function blendedPerMtok(m: ModelWithLatest): number | null {
-  if (m.promptUsd === null && m.completionUsd === null) return null;
-  return (m.promptUsd ?? m.completionUsd ?? 0) * 0.5 + (m.completionUsd ?? m.promptUsd ?? 0) * 0.5;
-}
-
 export function App() {
   const [hash, navigate] = useHashRoute();
-  const [ticker, setTicker] = useState<TickerItem[]>([]);
+  const [health, setHealth] = useState<HealthResponse | null>(null);
 
   useEffect(() => {
     let alive = true;
     api
-      .featured(18)
-      .then((r) => {
-        if (!alive) return;
-        const items: TickerItem[] = r.models
-          .filter((m) => m.latestTokens && m.latestTokens > 0)
-          .slice(0, 16)
-          .map((m) => ({
-            sym: displayName(m.name).toUpperCase().slice(0, 22),
-            price: m.isFree ? "$0" : perMtok(blendedPerMtok(m)),
-            volume: m.latestTokens,
-            free: m.isFree,
-          }));
-        setTicker(items);
-      })
-      .catch(() => setTicker([]));
+      .health()
+      .then((h) => alive && setHealth(h))
+      .catch(() => setHealth(null));
     return () => {
       alive = false;
     };
@@ -59,6 +43,7 @@ export function App() {
 
   const navItems: { key: string; label: string; to: string }[] = [
     { key: "market", label: "Market", to: "#/" },
+    { key: "explorer", label: "Price Explorer", to: "#/explorer" },
     { key: "models", label: "Models", to: "#/models" },
     { key: "providers", label: "Providers", to: "#/providers" },
   ];
@@ -68,19 +53,14 @@ export function App() {
       <header className="topbar">
         <div className="topbar-inner">
           <a className="brand" href="#/">
-            <span className="brand-mark">
-              <svg width="20" height="20" viewBox="0 0 32 32" aria-hidden="true">
-                <path d="M4 21 L11 14 L16 18 L27 7" fill="none" stroke="#3FD8E6" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
-                <circle cx="27" cy="7" r="2.7" fill="#F6B44A" />
+            <span className="brand-mark" aria-hidden="true">
+              <svg width="18" height="18" viewBox="0 0 32 32">
+                <path d="M4 22 L12 15 L18 19 L28 8" fill="none" stroke="#2b34cc" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" />
+                <circle cx="28" cy="8" r="2.6" fill="#b06a06" />
               </svg>
             </span>
-            <span>
-              <span className="brand-name">
-                Token<em>Exchange</em>
-              </span>
-              <span className="brand-sub" style={{ display: "block" }}>
-                AI inference market
-              </span>
+            <span className="brand-name">
+              Token<span className="brand-em">Exchange</span>
             </span>
           </a>
           <nav className="nav">
@@ -90,13 +70,17 @@ export function App() {
               </a>
             ))}
           </nav>
+          <div className="statusline">
+            <Stat k="models" v={health ? health.models.total : "—"} />
+            <Stat k="price pts" v={health ? compact(health.coverage.pricePoints, 0) : "—"} />
+            <Stat k="synced" v={health ? relTime(health.coverage.lastUsageCapturedAt) : "—"} />
+          </div>
         </div>
       </header>
 
-      <Ticker items={ticker} onPick={(sym) => navigateToSymbol(sym, navigate)} />
-
       <main className="container">
         {route.name === "market" && <MarketView navigate={navigate} />}
+        {route.name === "explorer" && <ExplorerView modelId={route.id} provider={route.provider} navigate={navigate} />}
         {route.name === "models" && <ModelsView navigate={navigate} />}
         {route.name === "providers" && <ProvidersView navigate={navigate} />}
         {route.name === "model" && <ModelView modelId={route.id} navigate={navigate} />}
@@ -104,11 +88,10 @@ export function App() {
 
       <footer className="footer">
         <div>
-          TokenExchange — estimated figures derived from public OpenRouter data. Prices update hourly. Spend is an
-          estimate (tokens × price), not billed revenue.
+          Estimated figures derived from public OpenRouter data, refreshed hourly. Spend is an estimate (tokens × observed effective rates, incl. cache discounts),
+          not billed revenue; per-provider price history accumulates going forward.
         </div>
         <div style={{ marginTop: 6 }}>
-          Source ·{" "}
           <a href="https://github.com/scx1332/token-tracker" target="_blank" rel="noreferrer">
             github.com/scx1332/token-tracker
           </a>
@@ -120,21 +103,28 @@ export function App() {
 
 type Route =
   | { name: "market" }
+  | { name: "explorer"; id?: string; provider?: string }
   | { name: "models" }
   | { name: "providers" }
   | { name: "model"; id: string };
 
 function parseRoute(hash: string): Route {
-  const clean = hash.replace(/^#\/?/, "");
-  if (clean.startsWith("model/")) {
-    return { name: "model", id: decodeURIComponent(clean.slice("model/".length)) };
+  const raw = hash.replace(/^#\/?/, "");
+  const [pathPart, queryPart] = raw.split("?");
+  const path = pathPart ?? "";
+  const query = new URLSearchParams(queryPart ?? "");
+  if (path.startsWith("model/")) {
+    return { name: "model", id: decodeURIComponent(path.slice("model/".length)) };
   }
-  if (clean.startsWith("models")) return { name: "models" };
-  if (clean.startsWith("providers")) return { name: "providers" };
+  if (path.startsWith("explorer")) {
+    const rest = path.slice("explorer".length).replace(/^\//, "");
+    const route: Route = { name: "explorer" };
+    if (rest) route.id = decodeURIComponent(rest);
+    const provider = query.get("provider");
+    if (provider) route.provider = provider;
+    return route;
+  }
+  if (path.startsWith("models")) return { name: "models" };
+  if (path.startsWith("providers")) return { name: "providers" };
   return { name: "market" };
-}
-
-// The ticker only knows a display symbol; jump to the models list filtered by it.
-function navigateToSymbol(sym: string, navigate: (to: string) => void) {
-  navigate(`#/models?q=${encodeURIComponent(sym.toLowerCase())}`);
 }

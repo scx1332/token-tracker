@@ -8,8 +8,16 @@ import {
 } from "./storage";
 import { toModelUpsert, buildUsageIndex, resolveUsageModelId } from "./modelMap";
 import { normalizePricing, pricingChanged, isFreePricing, estimateSpendUsd } from "./pricing";
-import { fetchRankings, fetchWeeklyChart, fetchApps } from "./usage";
-import { computeMarketAggregates } from "./market";
+import {
+  fetchRankings,
+  fetchWeeklyChart,
+  fetchApps,
+  fetchTopAppsForModel,
+  fetchEndpointStats,
+  fetchEffectivePricing,
+  fetchProviderTokenChart,
+} from "./usage";
+import { computeMarketAggregates, effectiveRate, aggregateAppSpend, type ModelTopApps } from "./market";
 import { mapPool } from "./concurrency";
 import type { NormalizedPricing, OpenRouterModel } from "./types";
 
@@ -185,6 +193,9 @@ async function ingestUsage(
 ): Promise<number> {
   const { client, storage, signal } = deps;
   const index = buildUsageIndex(models);
+  // Effective rates (real paid $/token incl. cache discounts) beat list prices
+  // wherever the daily sweep has them; the rest fall back to list.
+  const effRates = await storage.getLatestEffectiveRates().catch(() => new Map<string, { inputPerTok: number; outputPerTok: number }>());
 
   // `view=day` returns every active model for the latest complete day. `week`/
   // `month` are NOT dense daily series (they add only a sparse tail), so deep
@@ -204,15 +215,17 @@ async function ingestUsage(
       const resolved = resolveUsageModelId(index, rec.permaslug, rec.variant);
       const modelId = resolved ?? syntheticId(rec.permaslug, rec.variant);
       const price = resolved ? modelPriceById.get(resolved) : undefined;
-      const spend = price
-        ? estimateSpendUsd({
-            totalTokens: rec.tokens,
-            promptTokens: rec.promptTokens,
-            completionTokens: rec.completionTokens,
-            promptUsd: price.promptUsd,
-            completionUsd: price.completionUsd,
-          })
-        : null;
+      const eff = resolved ? effRates.get(resolved) : undefined;
+      const spend =
+        eff || price
+          ? estimateSpendUsd({
+              totalTokens: rec.tokens,
+              promptTokens: rec.promptTokens,
+              completionTokens: rec.completionTokens,
+              promptUsd: eff ? eff.inputPerTok : price?.promptUsd ?? null,
+              completionUsd: eff ? eff.outputPerTok : price?.completionUsd ?? null,
+            })
+          : null;
       merged.set(`${modelId}|${rec.date}`, {
         modelId,
         provider: "",
@@ -222,6 +235,7 @@ async function ingestUsage(
         completionTokens: rec.completionTokens,
         requests: rec.requests,
         estimatedSpendUsd: spend,
+        reasoningTokens: rec.reasoningTokens,
         source: "rankings",
       });
     }
@@ -233,16 +247,228 @@ async function ingestUsage(
 /** Store the weekly headline chart and app ranking as JSON blobs for the API. */
 async function ingestSideData(deps: IngestDeps): Promise<void> {
   const { client, storage, signal } = deps;
-  const [weekly, apps] = await Promise.allSettled([
+  const [weekly, apps, appSpend] = await Promise.allSettled([
     fetchWeeklyChart(client, signal),
     fetchApps(client, signal),
+    ingestAppSpend(deps),
   ]);
+  await ingestProviderVolume(deps).catch((e) => deps.log?.(`provider volume: ${errMsg(e)}`));
+  await ingestProviderUsage(deps).catch((e) => deps.log?.(`provider usage: ${errMsg(e)}`));
   if (weekly.status === "fulfilled") {
     await storage.setState("weekly_chart", JSON.stringify({ updatedAt: new Date().toISOString(), points: weekly.value }));
   }
   if (apps.status === "fulfilled") {
     await storage.setState("apps_ranking", JSON.stringify({ updatedAt: new Date().toISOString(), ...apps.value }));
   }
+  if (appSpend.status === "fulfilled" && appSpend.value) {
+    await storage.setState("apps_spend", JSON.stringify(appSpend.value));
+  }
+}
+
+/** How many top-spend models to sweep for per-app spend (1 request each). */
+const APP_SPEND_MODEL_SWEEP = 30;
+
+/**
+ * Estimate per-app spend. OpenRouter publishes no per-app dollars, so this
+ * sweeps the top paid models by est. spend, pulls each model's top-apps
+ * leaderboard (trailing ~month of tokens), prices those tokens at the model's
+ * effective rate, and aggregates per app.
+ */
+async function ingestAppSpend(deps: IngestDeps): Promise<object | null> {
+  const { client, storage, signal } = deps;
+  const models = await storage.getModelsWithLatest({ activeOnly: true, limit: 5000 });
+  const seen = new Set<string>();
+  const targets: { modelId: string; permaslug: string; variant: string; rate: number }[] = [];
+  for (const m of models) {
+    // Already spend-ordered; free models are skipped — they add $0 by definition.
+    if (m.isFree || !m.permaslug || (m.latestSpendUsd ?? 0) <= 0) continue;
+    const rate = effectiveRate(m);
+    if (rate === null) continue;
+    const variant = m.variant ?? "standard";
+    const key = `${m.permaslug} ${variant}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    targets.push({ modelId: m.modelId, permaslug: m.permaslug, variant, rate });
+    if (targets.length >= APP_SPEND_MODEL_SWEEP) break;
+  }
+  if (!targets.length) return null;
+
+  const perModel = await mapPool(
+    targets,
+    4,
+    async (t): Promise<ModelTopApps | null> => {
+      try {
+        const apps = await fetchTopAppsForModel(client, t.permaslug, t.variant, signal);
+        return { modelId: t.modelId, rate: t.rate, apps };
+      } catch {
+        return null;
+      }
+    },
+    signal ? { delayMs: 150, signal } : { delayMs: 150 },
+  );
+  const swept = perModel.filter((r): r is ModelTopApps => r !== null);
+  if (!swept.length) return null;
+
+  return {
+    updatedAt: new Date().toISOString(),
+    windowDays: 31,
+    modelsSwept: swept.length,
+    apps: aggregateAppSpend(swept).slice(0, 30),
+  };
+}
+
+/** How many models get per-provider volume snapshots each pass (1 request each). */
+const PROVIDER_VOLUME_SWEEP = 40;
+
+/**
+ * Snapshot per-provider request volume for the models that matter (top by est.
+ * spend ∪ top by tokens). OpenRouter serves only the live ~30-min window, so
+ * this hourly append is the sole source of provider market-share history.
+ */
+async function ingestProviderVolume(deps: IngestDeps): Promise<void> {
+  const { client, storage, signal } = deps;
+  const models = await storage.getModelsWithLatest({ activeOnly: true, limit: 5000 });
+  const eligible = models.filter((m) => m.permaslug && (m.latestTokens ?? 0) > 0);
+  const byTokens = [...eligible].sort((a, b) => (b.latestTokens ?? 0) - (a.latestTokens ?? 0)).slice(0, 15);
+
+  const seen = new Set<string>();
+  const targets: { modelId: string; permaslug: string; variant: string }[] = [];
+  // `models` is spend-ordered; big token movers ride along even when cheap.
+  for (const m of [...eligible.slice(0, PROVIDER_VOLUME_SWEEP - byTokens.length), ...byTokens]) {
+    const variant = m.variant ?? "standard";
+    const key = `${m.permaslug} ${variant}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    targets.push({ modelId: m.modelId, permaslug: m.permaslug!, variant });
+    if (targets.length >= PROVIDER_VOLUME_SWEEP) break;
+  }
+  if (!targets.length) return;
+
+  const capturedAt = new Date();
+  let saved = 0;
+  await mapPool(
+    targets,
+    4,
+    async (t) => {
+      try {
+        const rows = await fetchEndpointStats(client, t.permaslug, t.variant, signal);
+        if (rows.length) {
+          await storage.insertProviderVolumeSnapshots(t.modelId, rows, capturedAt);
+          saved += 1;
+        }
+      } catch {
+        // Best-effort: a missing model's stats never blocks the sweep.
+      }
+      return null;
+    },
+    signal ? { delayMs: 150, signal } : { delayMs: 150 },
+  );
+  deps.log?.(`provider volume: snapshotted ${saved}/${targets.length} models`);
+}
+
+/** How many models get the daily per-provider usage + effective-price sweep. */
+const PROVIDER_USAGE_SWEEP = 40;
+const PROVIDER_USAGE_MAX_PROVIDERS = 8;
+const PROVIDER_USAGE_MIN_GAP_MS = 20 * 3600_000;
+const PROVIDER_USAGE_STATE_KEY = "provider_usage_last_sweep";
+
+/**
+ * Daily sweep: per-provider daily token history (`provider-token-chart`, ~90d
+ * dense — self-backfilling) written as provider-keyed usage_snapshots rows,
+ * plus usage-weighted effective prices per model & provider appended to
+ * effective_price_snapshots. ~9 requests per model, so gated to once a day.
+ */
+async function ingestProviderUsage(deps: IngestDeps): Promise<void> {
+  const { client, storage, signal } = deps;
+  const last = await storage.getState(PROVIDER_USAGE_STATE_KEY);
+  if (last && Date.now() - new Date(last).getTime() < PROVIDER_USAGE_MIN_GAP_MS) return;
+
+  const models = await storage.getModelsWithLatest({ activeOnly: true, limit: 5000 });
+  const eligible = models.filter((m) => m.permaslug && (m.latestTokens ?? 0) > 0);
+  const byTokens = [...eligible].sort((a, b) => (b.latestTokens ?? 0) - (a.latestTokens ?? 0)).slice(0, 15);
+  const seen = new Set<string>();
+  const targets: typeof eligible = [];
+  for (const m of [...eligible.slice(0, PROVIDER_USAGE_SWEEP - byTokens.length), ...byTokens]) {
+    const key = `${m.permaslug} ${m.variant ?? "standard"}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    targets.push(m);
+    if (targets.length >= PROVIDER_USAGE_SWEEP) break;
+  }
+  if (!targets.length) return;
+
+  const capturedAt = new Date();
+  let usageRows = 0;
+  let priceRows = 0;
+  let repriced = 0;
+  await mapPool(
+    targets,
+    3,
+    async (m) => {
+      try {
+        const variant = m.variant ?? "standard";
+        const eff = await fetchEffectivePricing(client, m.permaslug!, variant, signal);
+        if (!eff) return null;
+
+        const effRows = [
+          { provider: "", effInputPerMtok: eff.weightedInputPerMtok, effOutputPerMtok: eff.weightedOutputPerMtok, totalTokens: null },
+          ...eff.providers
+            .filter((p) => p.slug)
+            .map((p) => ({ provider: p.slug, effInputPerMtok: p.effInputPerMtok, effOutputPerMtok: p.effOutputPerMtok, totalTokens: p.totalTokens })),
+        ];
+        await storage.insertEffectivePriceSnapshots(m.modelId, effRows, capturedAt);
+        priceRows += effRows.length;
+
+        // Re-price this model's daily history at the effective rates (carry-back:
+        // today's real paid rate is the best estimate for past days too).
+        if (eff.weightedInputPerMtok !== null && eff.weightedInputPerMtok > 0 && eff.weightedOutputPerMtok !== null) {
+          repriced += await storage.repriceUsageSpend(
+            m.modelId,
+            eff.weightedInputPerMtok / 1_000_000,
+            eff.weightedOutputPerMtok / 1_000_000,
+          );
+        }
+
+        // Per-provider daily tokens, priced at the provider's effective rates
+        // blended by the model's own observed prompt/completion mix.
+        const promptShare = (await storage.getObservedPromptShare(m.modelId)) ?? 0.9;
+        const providers = eff.providers
+          .filter((p) => p.slug)
+          .sort((a, b) => (b.totalTokens ?? 0) - (a.totalTokens ?? 0))
+          .slice(0, PROVIDER_USAGE_MAX_PROVIDERS);
+        const perProvider = await mapPool(providers, 2, async (p) => {
+          const chart = await fetchProviderTokenChart(client, m.permaslug!, variant, p.slug, signal);
+          const rows: UsageUpsert[] = chart.map((point) => ({
+            modelId: m.modelId,
+            provider: p.slug,
+            bucketDate: point.date,
+            tokens: point.tokens,
+            promptTokens: null,
+            completionTokens: null,
+            requests: null,
+            estimatedSpendUsd: estimateSpendUsd({
+              totalTokens: point.tokens,
+              promptUsd: p.effInputPerMtok !== null ? p.effInputPerMtok / 1_000_000 : null,
+              completionUsd: p.effOutputPerMtok !== null ? p.effOutputPerMtok / 1_000_000 : null,
+              promptShare,
+            }),
+            source: "provider-token-chart",
+          }));
+          return storage.upsertUsageBatch(rows, { onConflict: "update" });
+        });
+        usageRows += perProvider.reduce<number>((a, b) => a + (b ?? 0), 0);
+      } catch {
+        // Best-effort per model.
+      }
+      return null;
+    },
+    signal ? { delayMs: 200, signal } : { delayMs: 200 },
+  );
+
+  await storage.setState(PROVIDER_USAGE_STATE_KEY, capturedAt.toISOString());
+  deps.log?.(
+    `provider usage: ${usageRows} daily rows + ${priceRows} effective-price rows across ${targets.length} models; repriced ${repriced} spend rows`,
+  );
 }
 
 /** Compute market-wide aggregates + latest-day totals and store one snapshot. */

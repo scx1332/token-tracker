@@ -79,7 +79,7 @@ export function estimateSpendUsd(args: {
   }
 
   if (args.totalTokens == null) return null;
-  const promptShare = clamp(args.promptShare ?? 0.5, 0, 1);
+  const promptShare = clamp(args.promptShare ?? 0.9, 0, 1);
   const prompt = args.totalTokens * promptShare;
   const completion = args.totalTokens * (1 - promptShare);
   return prompt * pUsd + completion * cUsd;
@@ -89,8 +89,11 @@ function clamp(n: number, lo: number, hi: number): number {
   return Math.min(hi, Math.max(lo, n));
 }
 
-/** A single blended $/Mtok figure for quick comparison and price indices. */
-export function blendedPricePerMtok(p: NormalizedPricing, promptShare = 0.5): number | null {
+/**
+ * A single blended $/Mtok figure for quick comparison. Defaults to a 90/10
+ * input/output mix — observed market traffic is overwhelmingly input-heavy.
+ */
+export function blendedPricePerMtok(p: NormalizedPricing, promptShare = 0.9): number | null {
   if (p.promptUsd === null && p.completionUsd === null) return null;
   const blended = (p.promptUsd ?? 0) * promptShare + (p.completionUsd ?? 0) * (1 - promptShare);
   return blended * 1_000_000;

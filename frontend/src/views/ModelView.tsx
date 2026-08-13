@@ -47,26 +47,36 @@ export function ModelView({ modelId, navigate }: { modelId: string; navigate: (t
         <div className="pricebar">
           <div className="pb">
             <div className="pb-label">Input / M</div>
-            <div className="pb-val val-cyan">{m.isFree ? "$0" : perMtok(m.promptUsd)}</div>
+            <div className="pb-val val-min">{m.isFree ? "$0" : perMtok(m.promptUsd)}</div>
           </div>
           <div className="pb">
             <div className="pb-label">Output / M</div>
             <div className="pb-val val-gold">{m.isFree ? "$0" : perMtok(m.completionUsd)}</div>
           </div>
           <div className="pb">
-            <div className="pb-label">Daily tokens</div>
-            <div className="pb-val mono">{compact(latestUsage?.tokens ?? m.latestTokens)}</div>
-          </div>
-          <div className="pb">
             <div className="pb-label">Est. spend/day</div>
             <div className="pb-val val-gold">{usd(latestUsage?.estimatedSpendUsd ?? m.latestSpendUsd)}</div>
           </div>
+          <div className="pb">
+            <div className="pb-label">Daily tokens</div>
+            <div className="pb-val mono">{compact(latestUsage?.tokens ?? m.latestTokens)}</div>
+          </div>
+          <a
+            className="btn-primary"
+            href={`#/explorer/${encodeURIComponent(m.modelId)}`}
+            onClick={(e) => {
+              e.preventDefault();
+              navigate(`#/explorer/${encodeURIComponent(m.modelId)}`);
+            }}
+          >
+            Price Explorer →
+          </a>
         </div>
       </div>
 
       {m.promotionText && (
-        <div className="crash-flag" style={{ marginTop: 14, borderColor: "rgba(139,123,246,0.4)" }}>
-          <span className="pulse" style={{ background: C.violet }} />
+        <div className="signal promo-signal" style={{ marginTop: 14 }}>
+          <span className="sig-dot" style={{ background: C.violet }} />
           {m.promotionText}
         </div>
       )}
@@ -78,12 +88,12 @@ export function ModelView({ modelId, navigate }: { modelId: string; navigate: (t
         <Panel className="chart-card">
           <div className="chart-head">
             <div>
-              <div className="chart-title">Usage &amp; estimated spend</div>
-              <div className="chart-note">daily tokens · last 180 days</div>
+              <div className="chart-title">Estimated spend &amp; usage</div>
+              <div className="chart-note">daily est. spend · last 180 days</div>
             </div>
             <div className="legend">
-              <span><i style={{ background: C.cyan }} /> tokens</span>
               <span><i style={{ background: C.gold }} /> spend</span>
+              <span><i style={{ background: C.cyan }} /> tokens</span>
             </div>
           </div>
           {detail.usage.length > 1 ? <UsageHistoryChart rows={detail.usage} height={260} /> : <Empty label="No usage history yet." />}
@@ -113,6 +123,7 @@ export function ModelView({ modelId, navigate }: { modelId: string; navigate: (t
           <div className="eyebrow">Order book</div>
           <h2 className="section-title">{providerPrices.length} providers serving this model</h2>
         </div>
+        <span className="count-note mono">click a provider to chart it in the explorer</span>
       </div>
       {providerPrices.length ? (
         <div className="table-wrap">
@@ -128,12 +139,15 @@ export function ModelView({ modelId, navigate }: { modelId: string; navigate: (t
             </thead>
             <tbody>
               {providerPrices.map((p, i) => (
-                <tr key={p.provider + i} style={{ cursor: "default" }}>
+                <tr
+                  key={p.provider + i}
+                  onClick={() => navigate(`#/explorer/${encodeURIComponent(m.modelId)}?provider=${encodeURIComponent(p.provider)}`)}
+                >
                   <td className="left" style={{ fontFamily: "var(--font-body)", fontWeight: 500 }}>
                     {p.provider}
                     {i === 0 && <Badge kind="free">cheapest</Badge>}
                   </td>
-                  <td className="val-cyan">{p.isFree ? "$0" : perMtok(p.promptUsd)}</td>
+                  <td className="val-min">{p.isFree ? "$0" : perMtok(p.promptUsd)}</td>
                   <td className="val-gold">{p.isFree ? "$0" : perMtok(p.completionUsd)}</td>
                   <td style={{ color: "var(--muted)" }}>{p.contextLength ? compact(p.contextLength, 0) : "—"}</td>
                   <td style={{ color: "var(--muted)" }}>{p.quantization ?? "—"}</td>

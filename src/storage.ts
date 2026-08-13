@@ -60,6 +60,8 @@ export interface UsageUpsert {
   completionTokens: number | null;
   requests: number | null;
   estimatedSpendUsd: number | null;
+  /** Native reasoning tokens (subset of completion), when the feed reports them. */
+  reasoningTokens?: number | null;
   source: string;
 }
 
@@ -145,6 +147,7 @@ export interface UsageRow {
   completionTokens: number | null;
   requests: number | null;
   estimatedSpendUsd: number | null;
+  reasoningTokens: number | null;
 }
 
 export interface MarketRow {
@@ -318,6 +321,48 @@ export class Storage {
        ON ${this.t("usage_snapshots")} (model_id, bucket_date)`,
     );
 
+    // Reasoning tokens arrived after launch — patch existing installs in place.
+    await this.pool.query(
+      `ALTER TABLE ${this.t("usage_snapshots")} ADD COLUMN IF NOT EXISTS reasoning_tokens NUMERIC`,
+    );
+
+    // Usage-weighted effective prices ($/Mtok) per model ('' provider row) and
+    // per provider — captures discounts and the real traffic mix, not list price.
+    await this.pool.query(`
+      CREATE TABLE IF NOT EXISTS ${this.t("effective_price_snapshots")} (
+        id BIGSERIAL PRIMARY KEY,
+        model_id TEXT NOT NULL,
+        provider TEXT NOT NULL DEFAULT '',
+        captured_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        eff_input_usd_per_mtok DOUBLE PRECISION,
+        eff_output_usd_per_mtok DOUBLE PRECISION,
+        total_tokens NUMERIC
+      )
+    `);
+    await this.pool.query(
+      `CREATE INDEX IF NOT EXISTS ${quoteIdent("effective_price_model_idx")}
+       ON ${this.t("effective_price_snapshots")} (model_id, captured_at DESC)`,
+    );
+
+    // Per-provider request volume (trailing ~30-min window) captured hourly —
+    // OpenRouter publishes only the live value, so history exists only here.
+    await this.pool.query(`
+      CREATE TABLE IF NOT EXISTS ${this.t("provider_volume_snapshots")} (
+        id BIGSERIAL PRIMARY KEY,
+        model_id TEXT NOT NULL,
+        provider TEXT NOT NULL,
+        captured_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        window_minutes INTEGER,
+        request_count NUMERIC,
+        p50_throughput DOUBLE PRECISION,
+        p50_latency DOUBLE PRECISION
+      )
+    `);
+    await this.pool.query(
+      `CREATE INDEX IF NOT EXISTS ${quoteIdent("provider_volume_model_idx")}
+       ON ${this.t("provider_volume_snapshots")} (model_id, captured_at DESC)`,
+    );
+
     await this.pool.query(`
       CREATE TABLE IF NOT EXISTS ${this.t("market_snapshots")} (
         captured_at TIMESTAMPTZ PRIMARY KEY,
@@ -485,7 +530,7 @@ export class Storage {
         WHERE pp2.model_id = m.model_id AND pp2.provider <> ''
       ) pc ON TRUE
       ${where}
-      ORDER BY COALESCE(u.tokens, 0) DESC NULLS LAST, m.name ASC
+      ORDER BY COALESCE(u.estimated_spend_usd, 0) DESC, COALESCE(u.tokens, 0) DESC NULLS LAST, m.name ASC
       LIMIT $${params.length}
     `;
     const result = await this.pool.query(sql, params);
@@ -537,6 +582,233 @@ export class Storage {
       });
     }
     return map;
+  }
+
+  /** Append one sweep's effective-price rows: '' = usage-weighted across providers. */
+  async insertEffectivePriceSnapshots(
+    modelId: string,
+    rows: { provider: string; effInputPerMtok: number | null; effOutputPerMtok: number | null; totalTokens: number | null }[],
+    capturedAt?: Date,
+  ): Promise<void> {
+    if (rows.length === 0) return;
+    const at = capturedAt ?? new Date();
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      for (const r of rows) {
+        await client.query(
+          `INSERT INTO ${this.t("effective_price_snapshots")}
+             (model_id, provider, captured_at, eff_input_usd_per_mtok, eff_output_usd_per_mtok, total_tokens)
+           VALUES ($1,$2,$3,$4,$5,$6)`,
+          [modelId, r.provider, at, r.effInputPerMtok, r.effOutputPerMtok, r.totalTokens],
+        );
+      }
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  /** Latest usage-weighted effective rate per model ($/token), from the daily sweep. */
+  async getLatestEffectiveRates(): Promise<Map<string, { inputPerTok: number; outputPerTok: number }>> {
+    const res = await this.pool.query(
+      `SELECT DISTINCT ON (model_id) model_id, eff_input_usd_per_mtok, eff_output_usd_per_mtok
+       FROM ${this.t("effective_price_snapshots")}
+       WHERE provider = ''
+       ORDER BY model_id, captured_at DESC`,
+    );
+    const map = new Map<string, { inputPerTok: number; outputPerTok: number }>();
+    for (const row of res.rows) {
+      const inp = num(row.eff_input_usd_per_mtok);
+      const outp = num(row.eff_output_usd_per_mtok);
+      if (inp === null || outp === null || inp <= 0) continue;
+      map.set(row.model_id, { inputPerTok: inp / 1_000_000, outputPerTok: outp / 1_000_000 });
+    }
+    return map;
+  }
+
+  /**
+   * Re-price a model's model-level usage history at effective $/token rates
+   * (real paid rates embed cache discounts; list prices overstate spend on
+   * cache-heavy models). Rows without a prompt/completion split blend 90/10.
+   */
+  /** Observed prompt-token share for a model (from rows with a known split), or null. */
+  async getObservedPromptShare(modelId: string): Promise<number | null> {
+    const mix = await this.pool.query(
+      `SELECT SUM(prompt_tokens)::float8 / NULLIF(SUM(prompt_tokens + completion_tokens), 0)::float8 AS share
+       FROM ${this.t("usage_snapshots")}
+       WHERE model_id = $1 AND provider = '' AND prompt_tokens IS NOT NULL AND completion_tokens IS NOT NULL`,
+      [modelId],
+    );
+    const share = num(mix.rows[0]?.share);
+    return share !== null && share > 0 && share <= 1 ? share : null;
+  }
+
+  async repriceUsageSpend(modelId: string, inputPerTok: number, outputPerTok: number): Promise<number> {
+    // Split-less rows blend at the model's own observed prompt share (falling
+    // back to the market-typical 0.9) — a flat 90/10 overweights output for
+    // agentic models whose real mix is ~98/2.
+    const promptShare = (await this.getObservedPromptShare(modelId)) ?? 0.9;
+    const res = await this.pool.query(
+      `UPDATE ${this.t("usage_snapshots")}
+       SET estimated_spend_usd = CASE
+         WHEN prompt_tokens IS NOT NULL AND completion_tokens IS NOT NULL
+           THEN prompt_tokens * $2 + completion_tokens * $3
+         WHEN tokens IS NOT NULL
+           THEN tokens * ($2 * $4 + $3 * (1 - $4))
+         ELSE estimated_spend_usd
+       END
+       WHERE model_id = $1 AND provider = ''`,
+      [modelId, inputPerTok, outputPerTok, promptShare],
+    );
+    return res.rowCount ?? 0;
+  }
+
+  /**
+   * Estimated daily revenue per provider: each provider's daily tokens (from
+   * provider-token-chart) priced at its own effective rates. Head of the
+   * market only — the sweep covers the top ~40 models.
+   */
+  async getProviderRevenueSeries(filter: { since?: string } = {}): Promise<
+    { provider: string; bucketDate: string; spendUsd: number | null; tokens: number | null; models: number }[]
+  > {
+    const params: unknown[] = [];
+    let where = "provider <> ''";
+    if (filter.since) {
+      params.push(filter.since);
+      where += ` AND bucket_date >= $${params.length}`;
+    }
+    const res = await this.pool.query(
+      `SELECT provider, bucket_date, SUM(estimated_spend_usd) AS spend, SUM(tokens) AS tokens,
+              COUNT(DISTINCT model_id) AS models
+       FROM ${this.t("usage_snapshots")}
+       WHERE ${where}
+       GROUP BY provider, bucket_date
+       ORDER BY bucket_date ASC, provider ASC`,
+      params,
+    );
+    return res.rows.map((row) => ({
+      provider: row.provider,
+      bucketDate: toDateString(row.bucket_date),
+      spendUsd: num(row.spend),
+      tokens: num(row.tokens),
+      models: Number(row.models ?? 0),
+    }));
+  }
+
+  /** Per-provider per-model totals over a window — which models a provider lives off. */
+  async getProviderModelTotals(filter: { since?: string } = {}): Promise<
+    { provider: string; modelId: string; name: string; spendUsd: number | null; tokens: number | null }[]
+  > {
+    const params: unknown[] = [];
+    let where = "us.provider <> ''";
+    if (filter.since) {
+      params.push(filter.since);
+      where += ` AND us.bucket_date >= $${params.length}`;
+    }
+    const res = await this.pool.query(
+      `SELECT us.provider, us.model_id, COALESCE(m.name, us.model_id) AS name,
+              SUM(us.estimated_spend_usd) AS spend, SUM(us.tokens) AS tokens
+       FROM ${this.t("usage_snapshots")} us
+       LEFT JOIN ${this.t("models")} m ON m.model_id = us.model_id
+       WHERE ${where}
+       GROUP BY 1, 2, 3
+       ORDER BY SUM(us.estimated_spend_usd) DESC NULLS LAST`,
+      params,
+    );
+    return res.rows.map((row) => ({
+      provider: row.provider,
+      modelId: row.model_id,
+      name: row.name,
+      spendUsd: num(row.spend),
+      tokens: num(row.tokens),
+    }));
+  }
+
+  /** Effective-price history for one model, oldest → newest. */
+  async getEffectivePriceHistory(
+    modelId: string,
+    opts: { since?: string } = {},
+  ): Promise<{ provider: string; capturedAt: string; effInputPerMtok: number | null; effOutputPerMtok: number | null; totalTokens: number | null }[]> {
+    const params: unknown[] = [modelId];
+    let where = `model_id = $1`;
+    if (opts.since) {
+      params.push(opts.since);
+      where += ` AND captured_at >= $2`;
+    }
+    const res = await this.pool.query(
+      `SELECT provider, captured_at, eff_input_usd_per_mtok, eff_output_usd_per_mtok, total_tokens
+       FROM ${this.t("effective_price_snapshots")}
+       WHERE ${where}
+       ORDER BY captured_at ASC, provider ASC`,
+      params,
+    );
+    return res.rows.map((row) => ({
+      provider: row.provider,
+      capturedAt: toIso(row.captured_at) ?? "",
+      effInputPerMtok: num(row.eff_input_usd_per_mtok),
+      effOutputPerMtok: num(row.eff_output_usd_per_mtok),
+      totalTokens: num(row.total_tokens),
+    }));
+  }
+
+  /** Append one sweep's per-provider volume rows for a model (history is append-only). */
+  async insertProviderVolumeSnapshots(
+    modelId: string,
+    rows: { provider: string; requestCount: number; windowMinutes: number | null; p50Throughput: number | null; p50Latency: number | null }[],
+    capturedAt?: Date,
+  ): Promise<void> {
+    if (rows.length === 0) return;
+    const at = capturedAt ?? new Date();
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      for (const r of rows) {
+        await client.query(
+          `INSERT INTO ${this.t("provider_volume_snapshots")}
+             (model_id, provider, captured_at, window_minutes, request_count, p50_throughput, p50_latency)
+           VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+          [modelId, r.provider, at, r.windowMinutes, r.requestCount, r.p50Throughput, r.p50Latency],
+        );
+      }
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  /** Per-provider volume history for one model, oldest → newest. */
+  async getProviderVolumeHistory(
+    modelId: string,
+    opts: { since?: string } = {},
+  ): Promise<{ provider: string; capturedAt: string; requestCount: number | null; windowMinutes: number | null; p50Throughput: number | null; p50Latency: number | null }[]> {
+    const params: unknown[] = [modelId];
+    let where = `model_id = $1`;
+    if (opts.since) {
+      params.push(opts.since);
+      where += ` AND captured_at >= $2`;
+    }
+    const res = await this.pool.query(
+      `SELECT provider, captured_at, window_minutes, request_count, p50_throughput, p50_latency
+       FROM ${this.t("provider_volume_snapshots")}
+       WHERE ${where}
+       ORDER BY captured_at ASC, provider ASC`,
+      params,
+    );
+    return res.rows.map((row) => ({
+      provider: row.provider,
+      capturedAt: toIso(row.captured_at) ?? "",
+      windowMinutes: row.window_minutes === null ? null : Number(row.window_minutes),
+      requestCount: num(row.request_count),
+      p50Throughput: num(row.p50_throughput),
+      p50Latency: num(row.p50_latency),
+    }));
   }
 
   async insertPricePoint(point: PricePointInsert): Promise<void> {
@@ -650,6 +922,36 @@ export class Storage {
     return result.rows.map(mapPriceHistory);
   }
 
+  /**
+   * Full per-provider price history for a model (every provider that serves it,
+   * excluding the model-level '' default). This is the raw material for the price
+   * explorer: the client reconstructs the min-across-providers envelope and each
+   * provider's own step series from these change-log rows.
+   */
+  async getProviderPriceHistory(
+    modelId: string,
+    filter: { since?: string; limit?: number } = {},
+  ): Promise<PriceHistoryRow[]> {
+    const clauses = ["model_id = $1", "provider <> ''"];
+    const params: unknown[] = [modelId];
+    if (filter.since) {
+      params.push(filter.since);
+      clauses.push(`observed_at >= $${params.length}`);
+    }
+    params.push(resolveLimit(filter.limit));
+    const result = await this.pool.query(
+      `SELECT provider, observed_at, prompt_usd, completion_usd, request_usd, image_usd,
+              web_search_usd, internal_reasoning_usd, cache_read_usd, cache_write_usd,
+              context_length, quantization, is_free
+       FROM ${this.t("price_points")}
+       WHERE ${clauses.join(" AND ")}
+       ORDER BY observed_at ASC
+       LIMIT $${params.length}`,
+      params,
+    );
+    return result.rows.map(mapPriceHistory);
+  }
+
   // -------------------------------------------------------------------------
   // Usage
   // -------------------------------------------------------------------------
@@ -695,7 +997,7 @@ export class Storage {
     }
     const result = await this.pool.query(
       `SELECT model_id, provider, bucket_date, tokens, prompt_tokens, completion_tokens,
-              requests, estimated_spend_usd
+              requests, estimated_spend_usd, reasoning_tokens
        FROM ${this.t("usage_snapshots")}
        WHERE ${clauses.join(" AND ")}
        ORDER BY bucket_date ASC`,
@@ -733,7 +1035,61 @@ export class Storage {
     }));
   }
 
-  /** Top models by tokens on the most recent day, with names + prices. */
+  /**
+   * Weekly per-model spend/tokens from our own daily snapshots — the honest
+   * "model race" source. OpenRouter's weekly rankings chart names only each
+   * week's top-10 by tokens and folds the rest into "Others", which silently
+   * drops expensive lower-volume models. Only full ISO weeks are returned
+   * (the in-progress week would read as a crash), limited to the union of the
+   * window's top `topN` models by spend and by tokens.
+   */
+  async getWeeklyModelRace(filter: { since: string; topN?: number }): Promise<
+    { date: string; spendByModel: Record<string, number>; tokensByModel: Record<string, number> }[]
+  > {
+    const topN = Math.min(Math.max(1, filter.topN ?? 14), 40);
+    const result = await this.pool.query(
+      `SELECT date_trunc('week', bucket_date)::date AS week,
+              model_id,
+              SUM(tokens) AS tokens,
+              SUM(estimated_spend_usd) AS spend,
+              COUNT(*) AS days
+       FROM ${this.t("usage_snapshots")}
+       WHERE provider = '' AND bucket_date >= $1
+       GROUP BY 1, 2
+       ORDER BY 1 ASC`,
+      [filter.since],
+    );
+
+    const totalSpend = new Map<string, number>();
+    const totalTokens = new Map<string, number>();
+    const daysPerWeek = new Map<string, number>();
+    for (const row of result.rows) {
+      const week = toDateString(row.week);
+      const days = Number(row.days ?? 0);
+      daysPerWeek.set(week, Math.max(daysPerWeek.get(week) ?? 0, days));
+      totalSpend.set(row.model_id, (totalSpend.get(row.model_id) ?? 0) + (num(row.spend) ?? 0));
+      totalTokens.set(row.model_id, (totalTokens.get(row.model_id) ?? 0) + (num(row.tokens) ?? 0));
+    }
+    const rank = (m: Map<string, number>) => [...m.entries()].sort((a, b) => b[1] - a[1]).slice(0, topN).map(([k]) => k);
+    const keep = new Set([...rank(totalSpend), ...rank(totalTokens)]);
+
+    const byWeek = new Map<string, { spendByModel: Record<string, number>; tokensByModel: Record<string, number> }>();
+    for (const row of result.rows) {
+      const week = toDateString(row.week);
+      if ((daysPerWeek.get(week) ?? 0) < 7) continue; // partial week
+      if (!keep.has(row.model_id)) continue;
+      let bucket = byWeek.get(week);
+      if (!bucket) {
+        bucket = { spendByModel: {}, tokensByModel: {} };
+        byWeek.set(week, bucket);
+      }
+      bucket.spendByModel[row.model_id] = num(row.spend) ?? 0;
+      bucket.tokensByModel[row.model_id] = num(row.tokens) ?? 0;
+    }
+    return [...byWeek.entries()].map(([date, maps]) => ({ date, ...maps }));
+  }
+
+  /** Top models by estimated spend on the most recent day, with names + prices. */
   async getTopModelsByUsage(limit = 20): Promise<
     { modelId: string; name: string; author: string; tokens: number | null; spendUsd: number | null; bucketDate: string }[]
   > {
@@ -746,7 +1102,7 @@ export class Storage {
        FROM ${this.t("usage_snapshots")} us
        LEFT JOIN ${this.t("models")} m ON m.model_id = us.model_id
        WHERE us.provider = '' AND us.bucket_date = (SELECT d FROM latest)
-       ORDER BY us.tokens DESC NULLS LAST
+       ORDER BY us.estimated_spend_usd DESC NULLS LAST, us.tokens DESC NULLS LAST
        LIMIT $1`,
       [Math.min(Math.max(1, limit), 200)],
     );
@@ -849,6 +1205,49 @@ export class Storage {
       params,
     );
     return result.rows.map(mapMarket);
+  }
+
+  /**
+   * Daily price index over the full usage history. For each day: the
+   * usage-weighted and median input $/Mtok across paid models that routed
+   * tokens that day, priced from the change-log (last price observed on or
+   * before the day; the earliest known price carries back before tracking
+   * began — a quote holds until it changes). Days therefore differ by traffic
+   * mix immediately, and by real repricing as the change-log accumulates.
+   */
+  async getDailyPriceIndex(filter: { since?: string }): Promise<
+    { date: string; weightedUsdPerMtok: number | null; medianUsdPerMtok: number | null }[]
+  > {
+    const result = await this.pool.query(
+      `WITH priced AS (
+         SELECT us.bucket_date, us.tokens,
+                COALESCE(
+                  (SELECT pp.prompt_usd FROM ${this.t("price_points")} pp
+                   WHERE pp.model_id = us.model_id AND pp.provider = ''
+                     AND pp.observed_at < us.bucket_date + INTERVAL '1 day'
+                   ORDER BY pp.observed_at DESC LIMIT 1),
+                  (SELECT pp.prompt_usd FROM ${this.t("price_points")} pp
+                   WHERE pp.model_id = us.model_id AND pp.provider = ''
+                   ORDER BY pp.observed_at ASC LIMIT 1)
+                ) AS prompt_usd
+         FROM ${this.t("usage_snapshots")} us
+         WHERE us.provider = '' AND us.tokens > 0 AND us.bucket_date >= $1
+       )
+       SELECT bucket_date,
+              SUM(prompt_usd * tokens) FILTER (WHERE prompt_usd > 0)
+                / NULLIF(SUM(tokens) FILTER (WHERE prompt_usd > 0), 0) * 1e6 AS weighted,
+              PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY prompt_usd * 1e6)
+                FILTER (WHERE prompt_usd > 0) AS median
+       FROM priced
+       GROUP BY bucket_date
+       ORDER BY bucket_date ASC`,
+      [filter.since ?? "1970-01-01"],
+    );
+    return result.rows.map((row) => ({
+      date: toDateString(row.bucket_date),
+      weightedUsdPerMtok: num(row.weighted),
+      medianUsdPerMtok: num(row.median),
+    }));
   }
 
   async getLatestMarketSnapshot(): Promise<MarketRow | null> {
@@ -1009,12 +1408,13 @@ function usageInsertSql(table: string, onConflict: "update" | "ignore"): string 
           completion_tokens = EXCLUDED.completion_tokens,
           requests = EXCLUDED.requests,
           estimated_spend_usd = EXCLUDED.estimated_spend_usd,
+          reasoning_tokens = COALESCE(EXCLUDED.reasoning_tokens, ${table}.reasoning_tokens),
           source = EXCLUDED.source,
           captured_at = NOW()`;
   return `INSERT INTO ${table} (
       model_id, provider, bucket_date, tokens, prompt_tokens, completion_tokens,
-      requests, estimated_spend_usd, source, captured_at
-    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,NOW())
+      requests, estimated_spend_usd, reasoning_tokens, source, captured_at
+    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,NOW())
     ${conflict}`;
 }
 
@@ -1028,6 +1428,7 @@ function usageParams(point: UsageUpsert): unknown[] {
     point.completionTokens,
     point.requests,
     point.estimatedSpendUsd,
+    point.reasoningTokens ?? null,
     point.source,
   ];
 }
@@ -1118,6 +1519,7 @@ function mapUsage(row: any): UsageRow {
     completionTokens: num(row.completion_tokens),
     requests: num(row.requests),
     estimatedSpendUsd: num(row.estimated_spend_usd),
+    reasoningTokens: num(row.reasoning_tokens),
   };
 }
 

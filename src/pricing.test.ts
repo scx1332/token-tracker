@@ -89,9 +89,9 @@ describe("estimateSpendUsd", () => {
 });
 
 describe("blendedPricePerMtok", () => {
-  test("converts USD/token to USD/Mtok blended 50/50", () => {
+  test("converts USD/token to USD/Mtok blended 90/10 by default", () => {
     const v = blendedPricePerMtok(normalizePricing({ prompt: "0.000001", completion: "0.000003" }));
-    expect(v).toBeCloseTo((1e-6 * 0.5 + 3e-6 * 0.5) * 1e6, 8);
+    expect(v).toBeCloseTo((1e-6 * 0.9 + 3e-6 * 0.1) * 1e6, 8);
   });
   test("null when unpriced", () => {
     expect(blendedPricePerMtok(normalizePricing({}))).toBeNull();
