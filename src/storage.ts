@@ -163,6 +163,33 @@ export interface MarketRow {
   cheapestFrontierUsdPerMtok: number | null;
 }
 
+/** One hourly price-band snapshot of a GPU's vast.ai offer book. */
+export interface GpuPriceRow {
+  gpuName: string;
+  capturedAt: string;
+  offers: number;
+  gpusAvailable: number;
+  minUsd: number | null;
+  p25Usd: number | null;
+  medianUsd: number | null;
+  p75Usd: number | null;
+  maxUsd: number | null;
+  meanUsd: number | null;
+  supplyWeightedUsd: number | null;
+  minBidUsd: number | null;
+  verifiedOffers: number;
+  verifiedGpusAvailable: number;
+  verifiedMinUsd: number | null;
+  verifiedMedianUsd: number | null;
+}
+
+/**
+ * A band ready to store. Structurally identical to `GpuPriceSnapshot` in
+ * `gpu.ts` (which is where it is built) minus the capture timestamp, which the
+ * writer supplies once for the whole batch so a pass shares one instant.
+ */
+export type GpuPriceSnapshotInsert = Omit<GpuPriceRow, "capturedAt">;
+
 export interface IngestRunRow {
   id: string;
   startedAt: string;
@@ -378,6 +405,37 @@ export class Storage {
         raw JSONB
       )
     `);
+
+    // vast.ai GPU rental price bands. Unlike price_points this is NOT a
+    // change-log: the offer book is a continuous auction whose percentiles move
+    // every hour, so there is no "unchanged" state worth collapsing. One row per
+    // (gpu, hour) keeps the series dense and directly plottable.
+    await this.pool.query(`
+      CREATE TABLE IF NOT EXISTS ${this.t("gpu_price_snapshots")} (
+        gpu_name TEXT NOT NULL,
+        captured_at TIMESTAMPTZ NOT NULL,
+        offers INTEGER NOT NULL DEFAULT 0,
+        gpus_available INTEGER NOT NULL DEFAULT 0,
+        min_usd NUMERIC,
+        p25_usd NUMERIC,
+        median_usd NUMERIC,
+        p75_usd NUMERIC,
+        max_usd NUMERIC,
+        mean_usd NUMERIC,
+        supply_weighted_usd NUMERIC,
+        min_bid_usd NUMERIC,
+        verified_offers INTEGER NOT NULL DEFAULT 0,
+        verified_gpus_available INTEGER NOT NULL DEFAULT 0,
+        verified_min_usd NUMERIC,
+        verified_median_usd NUMERIC,
+        source TEXT NOT NULL DEFAULT 'bundles',
+        PRIMARY KEY (gpu_name, captured_at)
+      )
+    `);
+    await this.pool.query(
+      `CREATE INDEX IF NOT EXISTS ${quoteIdent("gpu_price_captured_idx")}
+       ON ${this.t("gpu_price_snapshots")} (captured_at DESC)`,
+    );
 
     await this.pool.query(`
       CREATE TABLE IF NOT EXISTS ${this.t("ingest_runs")} (
@@ -1207,6 +1265,107 @@ export class Storage {
     return result.rows.map(mapMarket);
   }
 
+  // -------------------------------------------------------------------------
+  // GPU rental prices (vast.ai)
+  // -------------------------------------------------------------------------
+
+  /** Write one hour's price bands for many GPUs in a single statement. */
+  async insertGpuPriceSnapshots(
+    capturedAt: Date,
+    snapshots: GpuPriceSnapshotInsert[],
+    source = "bundles",
+  ): Promise<number> {
+    if (snapshots.length === 0) return 0;
+
+    const params: unknown[] = [];
+    const tuples = snapshots.map((snap) => {
+      const base = params.length;
+      params.push(
+        snap.gpuName,
+        capturedAt.toISOString(),
+        snap.offers,
+        snap.gpusAvailable,
+        snap.minUsd,
+        snap.p25Usd,
+        snap.medianUsd,
+        snap.p75Usd,
+        snap.maxUsd,
+        snap.meanUsd,
+        snap.supplyWeightedUsd,
+        snap.minBidUsd,
+        snap.verifiedOffers,
+        snap.verifiedGpusAvailable,
+        snap.verifiedMinUsd,
+        snap.verifiedMedianUsd,
+        source,
+      );
+      const slots = Array.from({ length: 17 }, (_, i) => `$${base + i + 1}`);
+      return `(${slots.join(",")})`;
+    });
+
+    await this.pool.query(
+      `INSERT INTO ${this.t("gpu_price_snapshots")} (
+        gpu_name, captured_at, offers, gpus_available, min_usd, p25_usd, median_usd,
+        p75_usd, max_usd, mean_usd, supply_weighted_usd, min_bid_usd,
+        verified_offers, verified_gpus_available, verified_min_usd, verified_median_usd, source
+      ) VALUES ${tuples.join(",")}
+      ON CONFLICT (gpu_name, captured_at) DO UPDATE SET
+        offers = EXCLUDED.offers,
+        gpus_available = EXCLUDED.gpus_available,
+        min_usd = EXCLUDED.min_usd,
+        p25_usd = EXCLUDED.p25_usd,
+        median_usd = EXCLUDED.median_usd,
+        p75_usd = EXCLUDED.p75_usd,
+        max_usd = EXCLUDED.max_usd,
+        mean_usd = EXCLUDED.mean_usd,
+        supply_weighted_usd = EXCLUDED.supply_weighted_usd,
+        min_bid_usd = EXCLUDED.min_bid_usd,
+        verified_offers = EXCLUDED.verified_offers,
+        verified_gpus_available = EXCLUDED.verified_gpus_available,
+        verified_min_usd = EXCLUDED.verified_min_usd,
+        verified_median_usd = EXCLUDED.verified_median_usd,
+        source = EXCLUDED.source`,
+      params,
+    );
+    return snapshots.length;
+  }
+
+  /** Time series of price bands, optionally for one GPU. Ascending by time. */
+  async getGpuSeries(
+    filter: { gpuName?: string; since?: string; limit?: number } = {},
+  ): Promise<GpuPriceRow[]> {
+    const params: unknown[] = [];
+    const clauses: string[] = [];
+    if (filter.gpuName) {
+      params.push(filter.gpuName);
+      clauses.push(`gpu_name = $${params.length}`);
+    }
+    if (filter.since) {
+      params.push(filter.since);
+      clauses.push(`captured_at >= $${params.length}`);
+    }
+    params.push(resolveLimit(filter.limit));
+
+    const result = await this.pool.query(
+      `SELECT * FROM ${this.t("gpu_price_snapshots")}
+       ${clauses.length ? `WHERE ${clauses.join(" AND ")}` : ""}
+       ORDER BY captured_at ASC, gpu_name ASC
+       LIMIT $${params.length}`,
+      params,
+    );
+    return result.rows.map(mapGpuPrice);
+  }
+
+  /** The most recent snapshot for every GPU that has ever been captured. */
+  async getGpuLatest(): Promise<GpuPriceRow[]> {
+    const result = await this.pool.query(
+      `SELECT DISTINCT ON (gpu_name) *
+       FROM ${this.t("gpu_price_snapshots")}
+       ORDER BY gpu_name ASC, captured_at DESC`,
+    );
+    return result.rows.map(mapGpuPrice);
+  }
+
   /**
    * Daily price index over the full usage history. For each day: the
    * usage-weighted and median input $/Mtok across paid models that routed
@@ -1520,6 +1679,27 @@ function mapUsage(row: any): UsageRow {
     requests: num(row.requests),
     estimatedSpendUsd: num(row.estimated_spend_usd),
     reasoningTokens: num(row.reasoning_tokens),
+  };
+}
+
+function mapGpuPrice(row: any): GpuPriceRow {
+  return {
+    gpuName: String(row.gpu_name),
+    capturedAt: toIso(row.captured_at) ?? "",
+    offers: Number(row.offers ?? 0),
+    gpusAvailable: Number(row.gpus_available ?? 0),
+    minUsd: num(row.min_usd),
+    p25Usd: num(row.p25_usd),
+    medianUsd: num(row.median_usd),
+    p75Usd: num(row.p75_usd),
+    maxUsd: num(row.max_usd),
+    meanUsd: num(row.mean_usd),
+    supplyWeightedUsd: num(row.supply_weighted_usd),
+    minBidUsd: num(row.min_bid_usd),
+    verifiedOffers: Number(row.verified_offers ?? 0),
+    verifiedGpusAvailable: Number(row.verified_gpus_available ?? 0),
+    verifiedMinUsd: num(row.verified_min_usd),
+    verifiedMedianUsd: num(row.verified_median_usd),
   };
 }
 

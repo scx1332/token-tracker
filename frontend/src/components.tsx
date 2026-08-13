@@ -12,9 +12,11 @@ export function Delta({ value, invert = false }: { value: number | null; invert?
   const falling = value < -0.0005;
   const cls = rising ? (invert ? "down" : "up") : falling ? (invert ? "up" : "down") : "flat";
   const arrow = rising ? "▲" : falling ? "▼" : "•";
+  // The arrow already carries direction, so the magnitude is printed unsigned —
+  // pct() would prepend "+" to the absolute value and render "▼ +24.0%".
   return (
     <span className={`delta ${cls}`}>
-      {arrow} {pct(Math.abs(value))}
+      {arrow} {pct(Math.abs(value)).replace(/^\+/, "")}
     </span>
   );
 }

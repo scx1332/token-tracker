@@ -1,6 +1,7 @@
 import { Storage } from "./storage";
 import { readBuildInfo } from "./buildInfo";
 import { isFrontier } from "./frontier";
+import { ACCELERATORS } from "./accelerators";
 import { buildRateByPermaslug } from "./market";
 import { fetchJson } from "./scraper";
 import { parseEndpointStats } from "./usage";
@@ -95,6 +96,10 @@ export function createServer(storage: Storage, options: ServerOptions) {
         ]);
         return json({ series, models });
       }
+      case "/gpu":
+        return handleGpuLatest();
+      case "/gpu/series":
+        return handleGpuSeries(q);
       case "/apps":
         return handleKvJson("apps_ranking", { day: [], week: [], month: [] });
       case "/usage/weekly":
@@ -292,6 +297,34 @@ export function createServer(storage: Storage, options: ServerOptions) {
 
   async function handleKvJson(key: string, fallback: unknown): Promise<Response> {
     return json((await readKvJson(key)) ?? fallback);
+  }
+
+  /**
+   * Latest price band per accelerator, joined to the curated catalog so the
+   * frontend gets labels/tier/VRAM without duplicating the list. Accelerators we
+   * track but have never captured are returned with a null band rather than
+   * omitted, so the UI can show them as "no data yet" instead of silently
+   * shrinking the list.
+   */
+  async function handleGpuLatest(): Promise<Response> {
+    const rows = await storage.getGpuLatest();
+    const byName = new Map(rows.map((row) => [row.gpuName, row]));
+    const accelerators = ACCELERATORS.map((accelerator) => ({
+      ...accelerator,
+      latest: byName.get(accelerator.name) ?? null,
+    }));
+    return json({ accelerators });
+  }
+
+  async function handleGpuSeries(params: URLSearchParams): Promise<Response> {
+    const gpuName = params.get("gpu")?.trim();
+    const since = sinceFromParams(params, 30);
+    const series = await storage.getGpuSeries({
+      ...(gpuName ? { gpuName } : {}),
+      since,
+      limit: limitFromParams(params, 20_000, 100_000),
+    });
+    return json({ series, accelerators: ACCELERATORS });
   }
 
   const server = Bun.serve({

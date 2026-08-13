@@ -498,6 +498,176 @@ export function PriceIndexChart({
   return <Plot data={data} layout={layout} config={baseConfig} className="plot" style={{ width: "100%", height }} useResizeHandler />;
 }
 
+// ---------------------------------------------------------------------------
+// Compute — vast.ai GPU rental market
+// ---------------------------------------------------------------------------
+
+/**
+ * One accelerator's rental price over time: the p25–p75 body of the offer book
+ * as a band, the median through it, and the cheapest rentable offer as the hero
+ * line. Same visual grammar as the token PriceEnvelopeChart — cheapest is the
+ * strong blue, spread is the faint fill — so the two markets read alike.
+ */
+export function GpuBandChart({
+  points,
+  height = 340,
+  showBand = true,
+}: {
+  points: { date: string; minUsd: number | null; medianUsd: number | null; p25Usd: number | null; p75Usd: number | null }[];
+  height?: number;
+  showBand?: boolean;
+}) {
+  const data = useMemo<Data[]>(() => {
+    const x = points.map((p) => p.date);
+    const traces: Data[] = [];
+    const bandVisible =
+      showBand &&
+      points.some((p) => p.p25Usd != null && p.p75Usd != null && p.p75Usd > p.p25Usd + 1e-12);
+
+    if (bandVisible) {
+      traces.push({
+        type: "scatter",
+        mode: "lines",
+        name: "p25",
+        x,
+        y: points.map((p) => p.p25Usd),
+        line: { width: 0 },
+        hoverinfo: "skip",
+        showlegend: false,
+      });
+      traces.push({
+        type: "scatter",
+        mode: "lines",
+        name: "Middle 50% of offers",
+        x,
+        y: points.map((p) => p.p75Usd),
+        line: { width: 0 },
+        fill: "tonexty",
+        fillcolor: "rgba(43,52,204,0.07)",
+        hovertemplate: "p75 $%{y:.3~f}/GPU-hr<extra></extra>",
+        showlegend: true,
+      });
+    }
+
+    traces.push({
+      type: "scatter",
+      mode: "lines",
+      name: "Median offer",
+      x,
+      y: points.map((p) => p.medianUsd),
+      line: { color: C.indigo, width: 1.6, dash: "dot" },
+      hovertemplate: "$%{y:.3~f}/GPU-hr<extra>median</extra>",
+    });
+    traces.push({
+      type: "scatter",
+      mode: "lines+markers",
+      name: "Cheapest offer",
+      x,
+      y: points.map((p) => p.minUsd),
+      line: { color: C.min, width: 2.4 },
+      marker: { size: 4, color: C.min },
+      hovertemplate: "$%{y:.3~f}/GPU-hr<extra>min</extra>",
+    });
+    return traces;
+  }, [points, showBand]);
+
+  const layout = baseLayout({
+    height,
+    showlegend: true,
+    legend: { orientation: "h", x: 0, y: 1.02, yanchor: "bottom", font: { family: MONO, size: 11, color: C.muted } },
+    margin: { l: 62, r: 18, t: 46, b: 34 },
+    yaxis: {
+      gridcolor: C.grid,
+      showgrid: true,
+      zeroline: false,
+      tickprefix: "$",
+      tickfont: { family: MONO, color: C.faint, size: 10 },
+      title: { text: "USD / GPU-hour", font: { family: MONO, size: 10, color: C.faint } },
+    },
+  });
+
+  return <Plot data={data} layout={layout} config={baseConfig} className="plot" style={{ width: "100%", height }} useResizeHandler />;
+}
+
+/**
+ * Token price vs. raw compute price, both rebased to 100 at the left edge.
+ *
+ * The units genuinely don't convert ($/Mtok vs $/GPU-hour), so the chart
+ * compares slopes rather than levels — the y-axis is an index, and the raw
+ * values live in the tooltip so nobody has to read a ratio off the plot.
+ */
+export function ComputeVsTokensChart({
+  dates,
+  tokenIndex,
+  gpuIndex,
+  tokenRaw,
+  gpuRaw,
+  gpuLabel,
+  height = 320,
+}: {
+  dates: string[];
+  tokenIndex: (number | null)[];
+  gpuIndex: (number | null)[];
+  tokenRaw: (number | null)[];
+  gpuRaw: (number | null)[];
+  gpuLabel: string;
+  height?: number;
+}) {
+  const data = useMemo<Data[]>(
+    () => [
+      {
+        type: "scatter",
+        mode: "lines",
+        name: "Token price (weighted $/Mtok)",
+        x: dates,
+        y: tokenIndex,
+        line: { color: C.amber, width: 2.2 },
+        customdata: tokenRaw as unknown as number[],
+        hovertemplate: "index %{y:.1f} · $%{customdata:.4~f}/Mtok<extra>tokens</extra>",
+      },
+      {
+        type: "scatter",
+        mode: "lines",
+        name: `${gpuLabel} rental ($/GPU-hr)`,
+        x: dates,
+        y: gpuIndex,
+        line: { color: C.min, width: 2.2 },
+        customdata: gpuRaw as unknown as number[],
+        hovertemplate: "index %{y:.1f} · $%{customdata:.3~f}/GPU-hr<extra>compute</extra>",
+      },
+    ],
+    [dates, tokenIndex, gpuIndex, tokenRaw, gpuRaw, gpuLabel],
+  );
+
+  const layout = baseLayout({
+    height,
+    showlegend: true,
+    legend: { orientation: "h", x: 0, y: 1.02, yanchor: "bottom", font: { family: MONO, size: 11, color: C.muted } },
+    margin: { l: 52, r: 18, t: 46, b: 34 },
+    yaxis: {
+      gridcolor: C.grid,
+      showgrid: true,
+      zeroline: false,
+      tickfont: { family: MONO, color: C.faint, size: 10 },
+      title: { text: "index (start = 100)", font: { family: MONO, size: 10, color: C.faint } },
+    },
+    shapes: [
+      {
+        type: "line",
+        xref: "paper",
+        x0: 0,
+        x1: 1,
+        yref: "y",
+        y0: 100,
+        y1: 100,
+        line: { color: C.line, width: 1, dash: "dash" },
+      },
+    ],
+  });
+
+  return <Plot data={data} layout={layout} config={baseConfig} className="plot" style={{ width: "100%", height }} useResizeHandler />;
+}
+
 /** Model price history: prompt + completion $/Mtok (model-level, step lines). */
 export function PriceHistoryChart({ rows, height = 300 }: { rows: PriceHistoryRow[]; height?: number }) {
   const data = useMemo<Data[]>(() => {

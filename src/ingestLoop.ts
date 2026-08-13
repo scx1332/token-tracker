@@ -3,6 +3,8 @@ import { OpenRouterClient } from "./openrouter";
 import { Storage } from "./storage";
 import { runIngestion } from "./ingest";
 import { runBackfill } from "./backfill";
+import { runGpuIngestion } from "./ingestGpu";
+import { VastAiClient } from "./vastai";
 import { sleep } from "./concurrency";
 
 async function main(): Promise<void> {
@@ -19,6 +21,7 @@ async function main(): Promise<void> {
 
   const storage = await Storage.open(config.databaseUrl);
   const client = new OpenRouterClient(config.baseUrl, config.apiKey);
+  const vastClient = new VastAiClient(config.vastBaseUrl, config.vastApiKey);
   const controller = new AbortController();
   let stopping = false;
 
@@ -50,6 +53,25 @@ async function main(): Promise<void> {
       if (result.errors.length) log(`warnings: ${result.errors.join("; ")}`);
     } catch (error) {
       log(`pass FAILED: ${error instanceof Error ? error.message : String(error)}`);
+    }
+
+    // GPU rental prices are an independent data source: a vast.ai failure must
+    // not mark the OpenRouter pass bad, so it runs in its own try even when the
+    // pass above threw.
+    if (config.fetchGpu && !stopping) {
+      try {
+        const g = await runGpuIngestion({
+          storage,
+          client: vastClient,
+          concurrency: Math.min(4, config.concurrency),
+          requestDelayMs: config.requestDelayMs,
+          signal: controller.signal,
+          log,
+        });
+        if (g.errors.length) log(`vast.ai warnings: ${g.errors.join("; ")}`);
+      } catch (error) {
+        log(`vast.ai pass FAILED: ${error instanceof Error ? error.message : String(error)}`);
+      }
     }
 
     // One-time deep history backfill after the catalog first populates.

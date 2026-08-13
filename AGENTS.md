@@ -4,10 +4,12 @@
 
 Token Exchange scrapes OpenRouter hourly and presents the AI‑inference market:
 model prices (including per‑provider and promotional pricing), daily token
-throughput, estimated spend, and a usage‑weighted price index. A Bun + TypeScript
-backend stores everything in **PostgreSQL**; a Vite/React/Plotly frontend renders
-it as a market terminal. A `docker compose` stack runs Postgres, an ingest worker,
-the HTTP API, and the static frontend.
+throughput, estimated spend, and a usage‑weighted price index. It also sweeps
+**vast.ai** for GPU rental prices, so inference prices can be read against the
+cost of the silicon underneath. A Bun + TypeScript backend stores everything in
+**PostgreSQL**; a Vite/React/Plotly frontend renders it as a market terminal. A
+`docker compose` stack runs Postgres, an ingest worker, the HTTP API, and the
+static frontend.
 
 ## Commands
 
@@ -46,6 +48,24 @@ docker compose up -d --build                    # full stack (or ./deploy.sh)
   `CREATE TABLE IF NOT EXISTS` trips `pg_type_typname_nsp_index`.
 - **DATE columns are read as raw `YYYY-MM-DD` strings** (type parser 1082) so a
   non‑UTC server timezone can't shift usage bucket dates.
+- **vast.ai `gpu_name` is a literal, space-separated string** (`"H100 SXM"`, not
+  `"H100_SXM"`). A wrong spelling in `src/accelerators.ts` returns zero offers
+  silently rather than erroring — verify any addition against a live query.
+- **The vast.ai bundles search caps every response at 64 offers** regardless of
+  `limit`, and ignores `offset` (passing it returns an empty list). `listOffers`
+  pages keyset-style on `dph_total >= cursor`, deduplicating by offer id; RTX
+  4090 needs four rounds. Do not "simplify" this back to limit/offset.
+- **GPU prices are stored per GPU-hour, never per machine.** vast.ai quotes
+  `dph_total`/`min_bid` for a whole box, so everything divides by `num_gpus`.
+- **`gpu_price_snapshots` is a dense time series, not a change-log** (unlike
+  `price_points`): the offer book is a continuous auction, so one row per
+  `(gpu_name, captured_at)` every pass, all GPUs sharing one capture timestamp.
+  A GPU with no offers is stored as a zero-depth row — that is a real
+  observation about supply, not missing data.
+- **Compute vs token comparisons are indexed, never converted.** $/GPU-hour and
+  $/Mtok do not convert without knowing batch efficiency and model size, which
+  we do not observe. `frontend/src/gpu.ts` rebases both to 100 and the UI
+  compares slopes. `usdPerMtokFloor` exists but is an explicit lower bound.
 - **Keep tests hermetic.** `bun test` must pass with no DB and no network;
   storage/server tests skip unless `TEST_DATABASE_URL` (or `DATABASE_URL`) is set.
 - **Spend is an estimate** (tokens × observed effective rates where the daily
@@ -74,6 +94,15 @@ docker compose up -d --build                    # full stack (or ./deploy.sh)
   series starts sparse and fills in hourly as prices actually change.
 - `src/frontier.ts` — curated frontier families to always surface (mirrored in
   `frontend/src/frontier.ts`).
+- `src/vastai.ts` — vast.ai client: public `/api/v0/bundles/` offer search with
+  keyset paging, plus `fetchGpuHistory` for the market-metrics endpoints (inert
+  without a `machine_read` key — it returns null rather than throwing).
+- `src/accelerators.ts` — curated accelerator list (name/label/tier/VRAM).
+- `src/gpu.ts` — offer book → price band (pure, unit-tested).
+- `src/ingestGpu.ts` — the vast.ai pass. Runs in its own `try` in the loop so a
+  vast.ai outage never fails an OpenRouter pass.
+- `frontend/src/gpu.ts` — hourly → daily collapse, rebasing, and the token/compute
+  comparison (pure, unit-tested).
 
 ## Docker Compose
 

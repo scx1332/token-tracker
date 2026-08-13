@@ -7,6 +7,7 @@ import { ExplorerView } from "./views/ExplorerView";
 import { ModelsView } from "./views/ModelsView";
 import { ModelView } from "./views/ModelView";
 import { ProvidersView } from "./views/ProvidersView";
+import { ComputeView } from "./views/ComputeView";
 
 function useHashRoute(): [string, (to: string) => void] {
   const [hash, setHash] = useState(() => window.location.hash || "#/");
@@ -46,6 +47,7 @@ export function App() {
     { key: "explorer", label: "Price Explorer", to: "#/explorer" },
     { key: "models", label: "Models", to: "#/models" },
     { key: "providers", label: "Providers", to: "#/providers" },
+    { key: "compute", label: "Compute", to: "#/compute" },
   ];
 
   return (
@@ -83,6 +85,7 @@ export function App() {
         {route.name === "explorer" && <ExplorerView modelId={route.id} provider={route.provider} navigate={navigate} />}
         {route.name === "models" && <ModelsView navigate={navigate} />}
         {route.name === "providers" && <ProvidersView navigate={navigate} />}
+        {route.name === "compute" && <ComputeView navigate={navigate} />}
         {route.name === "model" && <ModelView modelId={route.id} navigate={navigate} />}
       </main>
 
@@ -106,6 +109,7 @@ type Route =
   | { name: "explorer"; id?: string; provider?: string }
   | { name: "models" }
   | { name: "providers" }
+  | { name: "compute" }
   | { name: "model"; id: string };
 
 function parseRoute(hash: string): Route {
@@ -126,5 +130,6 @@ function parseRoute(hash: string): Route {
   }
   if (path.startsWith("models")) return { name: "models" };
   if (path.startsWith("providers")) return { name: "providers" };
+  if (path.startsWith("compute")) return { name: "compute" };
   return { name: "market" };
 }

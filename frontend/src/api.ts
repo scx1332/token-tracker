@@ -201,6 +201,39 @@ export interface ProviderStat {
   avgUsdPerMtok: number | null;
 }
 
+/** One hourly price band for a GPU on the vast.ai rental market, USD/GPU-hour. */
+export interface GpuPriceRow {
+  gpuName: string;
+  capturedAt: string;
+  offers: number;
+  gpusAvailable: number;
+  minUsd: number | null;
+  p25Usd: number | null;
+  medianUsd: number | null;
+  p75Usd: number | null;
+  maxUsd: number | null;
+  meanUsd: number | null;
+  supplyWeightedUsd: number | null;
+  minBidUsd: number | null;
+  verifiedOffers: number;
+  verifiedGpusAvailable: number;
+  verifiedMinUsd: number | null;
+  verifiedMedianUsd: number | null;
+}
+
+export type AcceleratorTier = "flagship" | "datacenter" | "prosumer";
+
+export interface Accelerator {
+  name: string;
+  label: string;
+  tier: AcceleratorTier;
+  vramGb: number;
+}
+
+export interface AcceleratorWithLatest extends Accelerator {
+  latest: GpuPriceRow | null;
+}
+
 export interface HealthResponse {
   ok: boolean;
   serverTimeUtc: string;
@@ -252,4 +285,11 @@ export const api = {
   providerVolume: (id: string) => get<ProviderVolumeResponse>(`/model/provider-volume?id=${encodeURIComponent(id)}`),
   providers: () => get<{ providers: ProviderStat[] }>("/providers"),
   providersMarket: (days = 90) => get<ProvidersMarketResponse>(`/providers/market?days=${days}`),
+  gpu: () => get<{ accelerators: AcceleratorWithLatest[] }>("/gpu"),
+  gpuSeries: (params: { gpu?: string; days?: number } = {}) => {
+    const q = new URLSearchParams();
+    if (params.gpu) q.set("gpu", params.gpu);
+    q.set("days", String(params.days ?? 30));
+    return get<{ series: GpuPriceRow[]; accelerators: Accelerator[] }>(`/gpu/series?${q.toString()}`);
+  },
 };

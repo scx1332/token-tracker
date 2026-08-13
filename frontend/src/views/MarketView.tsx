@@ -1,9 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
 import { api, type HealthResponse, type MarketResponse } from "../api";
 import { Kpi, Panel, SectionHead, RankList, Loading, ErrorNote, type RankItem } from "../components";
-import { SpendTokensChart, PriceIndexChart, WeeklyBarsChart, WeeklyRaceChart, C } from "../charts";
+import { SpendTokensChart, PriceIndexChart, WeeklyBarsChart, WeeklyRaceChart, ComputeVsTokensChart, C } from "../charts";
 import { usd, usdExact, compact, mtok, relTime, seriesChange, displayName, pct } from "../format";
 import { forecastCurrentWeek, toWeeklyBuckets, trimLeadingPartial } from "../weekly";
+import { toDailyPoints, buildComparison } from "../gpu";
+import type { GpuPriceRow } from "../api";
+
+/** The accelerator the market view overlays by default — today's flagship. */
+const OVERLAY_GPU = "B200";
 
 export function MarketView({ navigate }: { navigate: (to: string) => void }) {
   const [market, setMarket] = useState<MarketResponse | null>(null);
@@ -12,6 +17,8 @@ export function MarketView({ navigate }: { navigate: (to: string) => void }) {
   // Price × volume is the market-share signal that matters, so spend leads.
   const [raceMode, setRaceMode] = useState<"spend" | "tokens">("spend");
   const [weekMode, setWeekMode] = useState<"spend" | "tokens" | "both">("both");
+  const [indexMode, setIndexMode] = useState<"price" | "compute">("price");
+  const [gpuSeries, setGpuSeries] = useState<GpuPriceRow[]>([]);
   // The race starts Jun 15 2026 — earlier history is noise for today's field.
   const RACE_SINCE = "2026-06-15";
 
@@ -24,10 +31,24 @@ export function MarketView({ navigate }: { navigate: (to: string) => void }) {
         setHealth(h);
       })
       .catch((e) => alive && setError(String(e.message ?? e)));
+
+    // The compute overlay is a secondary source: if vast.ai data is missing the
+    // market page must still render, so this failure is swallowed rather than
+    // promoted to the page-level error.
+    api
+      .gpuSeries({ gpu: OVERLAY_GPU, days: 60 })
+      .then((g) => alive && setGpuSeries(g.series))
+      .catch(() => alive && setGpuSeries([]));
+
     return () => {
       alive = false;
     };
   }, []);
+
+  const computeComparison = useMemo(
+    () => buildComparison(market?.priceIndex ?? [], toDailyPoints(gpuSeries), "medianUsd"),
+    [market, gpuSeries],
+  );
 
   // Mon–Sun totals of the same daily series (hooks must run before any return).
   // The oldest bucket is short only because coverage starts mid-week, so it goes.
@@ -305,19 +326,44 @@ export function MarketView({ navigate }: { navigate: (to: string) => void }) {
         <Panel className="chart-card">
           <div className="chart-head">
             <div>
-              <div className="chart-title">Price index over time</div>
-              <div className="chart-note">usage-weighted vs median input $/Mtok · daily close</div>
+              <div className="chart-title">
+                {indexMode === "price" ? "Price index over time" : `Tokens vs ${OVERLAY_GPU} rental`}
+              </div>
+              <div className="chart-note">
+                {indexMode === "price"
+                  ? "usage-weighted vs median input $/Mtok · daily close"
+                  : "both rebased to 100 at window start · index, not level"}
+              </div>
             </div>
-            <div className="legend">
-              <span>
-                <i style={{ background: C.gold }} /> weighted
-              </span>
-              <span>
-                <i style={{ background: C.violet }} /> median
-              </span>
+            <div className="seg seg-sm">
+              <button className={indexMode === "price" ? "active" : ""} onClick={() => setIndexMode("price")}>
+                Price index
+              </button>
+              <button
+                className={indexMode === "compute" ? "active" : ""}
+                onClick={() => setIndexMode("compute")}
+                disabled={computeComparison.dates.length < 2}
+                title={
+                  computeComparison.dates.length < 2
+                    ? "Needs GPU snapshots overlapping the token index — builds up daily"
+                    : "Compare against raw accelerator rental prices"
+                }
+              >
+                vs compute
+              </button>
             </div>
           </div>
-          {market.priceIndex.length > 1 ? (
+          {indexMode === "compute" ? (
+            <ComputeVsTokensChart
+              dates={computeComparison.dates}
+              tokenIndex={computeComparison.tokenIndex}
+              gpuIndex={computeComparison.gpuIndex}
+              tokenRaw={computeComparison.tokenRaw}
+              gpuRaw={computeComparison.gpuRaw}
+              gpuLabel={OVERLAY_GPU}
+              height={240}
+            />
+          ) : market.priceIndex.length > 1 ? (
             <PriceIndexChart rows={market.priceIndex} height={240} />
           ) : (
             <div className="empty" style={{ padding: "40px 10px" }}>

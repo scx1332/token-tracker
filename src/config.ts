@@ -9,6 +9,9 @@ export interface IngestConfig {
   requestDelayMs: number;
   fetchEndpoints: boolean;
   fetchUsage: boolean;
+  fetchGpu: boolean;
+  vastBaseUrl: string;
+  vastApiKey: string | null;
   backfillDays: number;
   once: boolean;
 }
@@ -20,6 +23,7 @@ export interface ServerConfig {
 }
 
 const DEFAULT_BASE_URL = "https://openrouter.ai";
+const DEFAULT_VAST_BASE_URL = "https://console.vast.ai";
 const DEFAULT_INTERVAL_MS = 3_600_000; // 1 hour
 const DEFAULT_CONCURRENCY = 6;
 const DEFAULT_REQUEST_DELAY_MS = 120;
@@ -47,6 +51,9 @@ export function parseIngestConfig(
     requestDelayMs: parseNumber("--request-delay-ms", parsed.values["request-delay-ms"] ?? env.INGEST_REQUEST_DELAY_MS ?? String(DEFAULT_REQUEST_DELAY_MS)),
     fetchEndpoints: parseBoolean(parsed.values["fetch-endpoints"] ?? env.INGEST_FETCH_ENDPOINTS ?? "true"),
     fetchUsage: parseBoolean(parsed.values["fetch-usage"] ?? env.INGEST_FETCH_USAGE ?? "true"),
+    fetchGpu: parseBoolean(parsed.values["fetch-gpu"] ?? env.INGEST_FETCH_GPU ?? "true"),
+    vastBaseUrl: stripTrailingSlash(parsed.values["vast-base-url"] ?? env.VASTAI_BASE_URL ?? DEFAULT_VAST_BASE_URL),
+    vastApiKey: nonEmpty(parsed.values["vast-api-key"] ?? env.VASTAI_API_KEY),
     backfillDays: parseNumber("--backfill-days", parsed.values["backfill-days"] ?? env.BACKFILL_DAYS ?? String(DEFAULT_BACKFILL_DAYS)),
     once: parsed.flags.has("once"),
   };
@@ -154,6 +161,12 @@ Options:
   --request-delay-ms <n>      Delay between endpoint requests. Default 120.
   --fetch-endpoints <bool>    Fetch per-provider pricing. Default true.
   --fetch-usage <bool>        Fetch usage/ranking analytics. Default true.
+  --fetch-gpu <bool>          Fetch vast.ai GPU rental prices. Default true.
+  --vast-base-url <url>       vast.ai base URL. Default https://console.vast.ai
+  --vast-api-key <key>        vast.ai key (or VASTAI_API_KEY). Only needed for
+                              historical market metrics, which require a key with
+                              the machine_read permission group; the live offer
+                              book used for price bands is public.
   --once                      Run a single pass and exit.
   --help                      Show this message.`;
 }

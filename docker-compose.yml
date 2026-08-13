@@ -34,6 +34,9 @@ services:
       INGEST_REQUEST_DELAY_MS: ${INGEST_REQUEST_DELAY_MS:-120}
       INGEST_FETCH_ENDPOINTS: ${INGEST_FETCH_ENDPOINTS:-true}
       INGEST_FETCH_USAGE: ${INGEST_FETCH_USAGE:-true}
+      INGEST_FETCH_GPU: ${INGEST_FETCH_GPU:-true}
+      VASTAI_BASE_URL: ${VASTAI_BASE_URL:-https://console.vast.ai}
+      VASTAI_API_KEY: ${VASTAI_API_KEY:-}
       BACKFILL_DAYS: ${BACKFILL_DAYS:-120}
     command: ["bun", "run", "ingest"]
 

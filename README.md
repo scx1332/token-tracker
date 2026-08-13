@@ -11,6 +11,11 @@ It tracks **every** OpenRouter model (~410 live), **every provider** per model,
 their prices (including promotional discounts), and daily token throughput — and
 derives estimated daily spend (tokens × price) plus a usage‑weighted price index.
 
+It also sweeps the **vast.ai** GPU rental marketplace hourly, so the price of
+inference can be read against the price of the silicon underneath it: when token
+prices fall faster than accelerator rental, something other than hardware cost is
+driving them down.
+
 ![dashboard](docs/dashboard.png)
 
 ## What it collects
@@ -23,6 +28,27 @@ derives estimated daily spend (tokens × price) plus a usage‑weighted price in
 | Deep history (~90d daily) | `GET /api/frontend/v1/stats/provider-token-chart` | summed across a model's providers (backfill) |
 | 1‑year weekly race | `GET /api/frontend/v1/rankings/model-rankings-chart` | top‑10 weekly totals |
 | Top apps | `GET /api/frontend/v1/rankings/apps` | who routes the tokens |
+| GPU rental prices | `GET https://console.vast.ai/api/v0/bundles/` | live offer book per accelerator; **public, no key** |
+
+### GPU rental prices (the Compute view)
+
+16 accelerators are tracked — B200, B300, H200/H200 NVL, the H100 family, A100,
+L40S, RTX PRO 6000, RTX 5090/4090/3090, T4 — and every one's **full** offer book
+is swept each pass. vast.ai quotes whole machines, so all prices are normalized
+to **USD per GPU‑hour** (an 8×B200 box at $85/hr is $10.63/GPU‑hr).
+
+Each sweep stores a percentile **band** rather than one number, because the
+rental market is thin and bimodal: min (the floor you can actually rent at), p25,
+median, p75, max, a supply‑weighted mean, the cheapest interruptible bid, and the
+same for the "verified host" subset — plus offer count and GPUs available as a
+measure of depth.
+
+Two quirks of the vast.ai API worth knowing: responses are hard‑capped at **64
+offers** regardless of `limit` and `offset` is ignored, so the client pages
+keyset‑style on price; and the documented historical endpoints
+(`/api/v0/metrics/gpu/history/`) need a key with the **`machine_read`** permission
+group, which host accounts have and client accounts do not. The live offer book
+needs no key at all, so GPU history accumulates from first ingest forward.
 
 Prices are stored as a **change‑log**: a new row is written only when a price
 actually changes, so history is exact and compact. Usage is a daily time series;
@@ -37,11 +63,13 @@ estimated spend is computed from the model's current price.
                          ┌─────────────┐
   OpenRouter  ── hourly ─►   ingest     │  bun run ingest   (catalog, prices,
    public + frontend APIs │  (worker)   │                    usage, backfill)
-                         └──────┬──────┘
+  vast.ai     ── hourly ─►             │                    + GPU rental prices
+   public bundles API     └──────┬──────┘
                                 │ writes
                          ┌──────▼──────┐
                          │  Postgres   │  models · price_points · usage_snapshots
-                         │             │  market_snapshots · ingest_runs · kv_state
+                         │             │  market_snapshots · gpu_price_snapshots
+                         │             │  ingest_runs · kv_state
                          └──────┬──────┘
                                 │ reads
                          ┌──────▼──────┐        ┌──────────────┐
@@ -80,6 +108,8 @@ All endpoints are JSON, CORS‑enabled, served under `/api` by nginx.
 | `GET /usage?model=<id>` | usage history |
 | `GET /providers` | per‑provider rollup (model count, cheapest/avg $/Mtok) |
 | `GET /apps`, `GET /usage/weekly` | cached ranking blobs |
+| `GET /gpu` | curated accelerator list, each with its latest vast.ai price band |
+| `GET /gpu/series?gpu=B200&days=30` | GPU rental price bands over time (omit `gpu` for all) |
 
 ## Local development
 
