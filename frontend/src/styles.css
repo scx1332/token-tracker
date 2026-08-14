@@ -3,7 +3,8 @@
    Light, technical, dense. Neutrals carry the page; color only encodes meaning:
    teal = tokens/volume, amber = dollars/spend, indigo/blue = price, and the
    MINIMUM price is the strongest blue on the page. No motion, no glow.
-   Type: Archivo (display/body) · IBM Plex Mono (all data + numbers).
+   Type: the native system sans-serif everywhere — readability over style —
+   with tabular figures so columns of numbers still line up.
    ========================================================================== */
 
 :root {
@@ -33,9 +34,8 @@
   --radius-sm: 6px;
   --shadow: 0 1px 2px rgba(16, 24, 40, 0.04), 0 2px 6px -2px rgba(16, 24, 40, 0.06);
 
-  --font-display: "Archivo", system-ui, -apple-system, sans-serif;
-  --font-body: "Archivo", system-ui, -apple-system, sans-serif;
-  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --font-display: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-body: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
 
   --maxw: 1880px;
 
@@ -57,6 +57,8 @@ body {
   color: var(--ink);
   font-family: var(--font-body);
   font-size: 14.5px;
+  /* Proportional font, but digits stay fixed-width so tables align. */
+  font-variant-numeric: tabular-nums;
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
@@ -84,7 +86,7 @@ h4 {
 }
 
 .mono {
-  font-family: var(--font-mono);
+  font-family: var(--font-body);
   font-variant-numeric: tabular-nums;
   font-feature-settings: "tnum" 1;
 }
@@ -150,7 +152,7 @@ h4 {
 }
 
 .nav a {
-  font-family: var(--font-mono);
+  font-family: var(--font-body);
   font-size: 12px;
   letter-spacing: 0.02em;
   color: var(--muted);
@@ -184,7 +186,7 @@ h4 {
 }
 
 .stat-k {
-  font-family: var(--font-mono);
+  font-family: var(--font-body);
   font-size: 9.5px;
   letter-spacing: 0.14em;
   text-transform: uppercase;
@@ -238,7 +240,7 @@ h4 {
 }
 
 .eyebrow {
-  font-family: var(--font-mono);
+  font-family: var(--font-body);
   font-size: 10.5px;
   letter-spacing: 0.2em;
   text-transform: uppercase;
@@ -295,7 +297,7 @@ h4 {
 }
 
 .hero-meta .hm {
-  font-family: var(--font-mono);
+  font-family: var(--font-body);
   font-size: 11px;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -318,7 +320,7 @@ h4 {
   display: inline-flex;
   align-items: center;
   gap: 9px;
-  font-family: var(--font-mono);
+  font-family: var(--font-body);
   font-size: 11.5px;
   color: var(--ink-2);
   padding: 5px 11px;
@@ -370,7 +372,7 @@ h4 {
 }
 
 .kpi-label {
-  font-family: var(--font-mono);
+  font-family: var(--font-body);
   font-size: 10.5px;
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -401,7 +403,7 @@ h4 {
 }
 
 .kpi-value {
-  font-family: var(--font-mono);
+  font-family: var(--font-body);
   font-variant-numeric: tabular-nums;
   font-size: 25px;
   font-weight: 500;
@@ -437,7 +439,7 @@ h4 {
 
 /* delta pill */
 .delta {
-  font-family: var(--font-mono);
+  font-family: var(--font-body);
   font-size: 11px;
   font-weight: 500;
   padding: 1px 6px;
@@ -482,7 +484,7 @@ h4 {
 .chart-card .chart-note {
   font-size: 11px;
   color: var(--faint);
-  font-family: var(--font-mono);
+  font-family: var(--font-body);
   margin-top: 2px;
 }
 
@@ -501,7 +503,7 @@ h4 {
 }
 
 .legend span {
-  font-family: var(--font-mono);
+  font-family: var(--font-body);
   font-size: 10.5px;
   color: var(--muted);
   display: inline-flex;
@@ -545,7 +547,7 @@ h4 {
 }
 
 .ctl-label {
-  font-family: var(--font-mono);
+  font-family: var(--font-body);
   font-size: 9.5px;
   letter-spacing: 0.14em;
   text-transform: uppercase;
@@ -568,7 +570,7 @@ h4 {
 }
 
 .statbox-label {
-  font-family: var(--font-mono);
+  font-family: var(--font-body);
   font-size: 10px;
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -607,7 +609,7 @@ h4 {
 }
 
 .ghost-link {
-  font-family: var(--font-mono);
+  font-family: var(--font-body);
   font-size: 12px;
   color: var(--min);
   white-space: nowrap;
@@ -619,7 +621,7 @@ h4 {
 
 .btn-primary {
   align-self: center;
-  font-family: var(--font-mono);
+  font-family: var(--font-body);
   font-size: 12px;
   color: #fff;
   background: var(--min);
@@ -646,7 +648,7 @@ h4 {
 }
 
 .chip {
-  font-family: var(--font-mono);
+  font-family: var(--font-body);
   font-size: 11.5px;
   padding: 6px 11px;
   background: var(--panel);
@@ -685,7 +687,7 @@ table.tt {
 }
 
 table.tt th {
-  font-family: var(--font-mono);
+  font-family: var(--font-body);
   font-size: 10px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -719,7 +721,7 @@ table.tt td {
   padding: 10px 14px;
   border-bottom: 1px solid var(--line-soft);
   text-align: right;
-  font-family: var(--font-mono);
+  font-family: var(--font-body);
   font-variant-numeric: tabular-nums;
   font-size: 12.5px;
   color: var(--ink-2);
@@ -760,7 +762,7 @@ table.tt tbody tr:last-child td {
 }
 
 .model-id {
-  font-family: var(--font-mono);
+  font-family: var(--font-body);
   font-size: 10.5px;
   color: var(--faint);
 }
@@ -788,7 +790,7 @@ table.tt tbody tr:last-child td {
 /* ---- Badges ----------------------------------------------------------- */
 
 .badge {
-  font-family: var(--font-mono);
+  font-family: var(--font-body);
   font-size: 9px;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -835,7 +837,7 @@ table.tt tbody tr:last-child td {
 
 .input,
 .select {
-  font-family: var(--font-mono);
+  font-family: var(--font-body);
   font-size: 13px;
   color: var(--ink);
   background: var(--panel);
@@ -872,7 +874,7 @@ table.tt tbody tr:last-child td {
   background: transparent;
   border: none;
   color: var(--muted);
-  font-family: var(--font-mono);
+  font-family: var(--font-body);
   font-size: 12px;
   padding: 7px 13px;
   border-right: 1px solid var(--line);
@@ -899,7 +901,7 @@ table.tt tbody tr:last-child td {
 
 .count-note {
   margin-left: auto;
-  font-family: var(--font-mono);
+  font-family: var(--font-body);
   font-size: 11px;
   color: var(--faint);
 }
@@ -907,7 +909,7 @@ table.tt tbody tr:last-child td {
 /* ---- Model detail ----------------------------------------------------- */
 
 .back-link {
-  font-family: var(--font-mono);
+  font-family: var(--font-body);
   font-size: 12px;
   color: var(--muted);
   display: inline-flex;
@@ -935,7 +937,7 @@ table.tt tbody tr:last-child td {
 }
 
 .detail-id {
-  font-family: var(--font-mono);
+  font-family: var(--font-body);
   font-size: 12px;
   color: var(--faint);
   margin-top: 4px;
@@ -957,7 +959,7 @@ table.tt tbody tr:last-child td {
 }
 
 .pricebar .pb {
-  font-family: var(--font-mono);
+  font-family: var(--font-body);
 }
 
 .pricebar .pb-label {
@@ -990,7 +992,7 @@ table.tt tbody tr:last-child td {
 }
 
 .meta-grid .m-k {
-  font-family: var(--font-mono);
+  font-family: var(--font-body);
   font-size: 9.5px;
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -998,7 +1000,7 @@ table.tt tbody tr:last-child td {
 }
 
 .meta-grid .m-v {
-  font-family: var(--font-mono);
+  font-family: var(--font-body);
   font-size: 13px;
   color: var(--ink-2);
   margin-top: 4px;
@@ -1026,7 +1028,7 @@ table.tt tbody tr:last-child td {
 }
 
 .rank-n {
-  font-family: var(--font-mono);
+  font-family: var(--font-body);
   font-size: 11.5px;
   color: var(--faint);
   text-align: right;
@@ -1053,7 +1055,7 @@ table.tt tbody tr:last-child td {
 }
 
 .rank-val {
-  font-family: var(--font-mono);
+  font-family: var(--font-body);
   font-variant-numeric: tabular-nums;
   font-size: 12.5px;
   text-align: right;
@@ -1074,7 +1076,7 @@ table.tt tbody tr:last-child td {
   padding: 54px 20px;
   text-align: center;
   color: var(--faint);
-  font-family: var(--font-mono);
+  font-family: var(--font-body);
   font-size: 13px;
 }
 
@@ -1100,7 +1102,7 @@ table.tt tbody tr:last-child td {
   padding: 20px clamp(16px, 3vw, 40px);
   text-align: center;
   color: var(--faint);
-  font-family: var(--font-mono);
+  font-family: var(--font-body);
   font-size: 11px;
   margin-top: auto;
   max-width: var(--maxw);
@@ -1246,7 +1248,7 @@ table.tt tbody tr:last-child td {
 
 .forecast-note .fc-head b {
   color: var(--ink);
-  font-family: var(--font-mono);
+  font-family: var(--font-body);
 }
 
 .forecast-note .fc-swatch {

@@ -15,6 +15,7 @@ export const C = {
   text: "#111722",
   muted: "#586576",
   faint: "#8b97a6",
+  tick: "#39434f", // axis tick labels — darker than muted, softer than ink
   line: "#e2e7ee",
   grid: "#eef1f6",
   panel: "#ffffff",
@@ -33,7 +34,7 @@ export const C = {
   violet: "#6a54c8",
 };
 
-const MONO = "IBM Plex Mono, ui-monospace, monospace";
+const FONT = 'system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif';
 
 // Distinct hues for compared provider lines (indigo is reserved for the
 // minimum-price hero line). Index = order the provider was selected in.
@@ -63,13 +64,13 @@ function baseLayout(overrides: Partial<Layout> = {}): Partial<Layout> {
   return {
     paper_bgcolor: "#ffffff",
     plot_bgcolor: "#ffffff",
-    font: { family: MONO, color: C.muted, size: 11 },
+    font: { family: FONT, color: C.muted, size: 11 },
     margin: { l: 56, r: 16, t: 12, b: 34 },
     hovermode: "x unified",
     hoverlabel: {
       bgcolor: "#ffffff",
       bordercolor: C.line,
-      font: { family: MONO, color: C.ink, size: 12 },
+      font: { family: FONT, color: C.ink, size: 12 },
     },
     showlegend: false,
     colorway: [C.teal, C.amber, C.indigo, C.up, C.down, C.violet],
@@ -80,7 +81,7 @@ function baseLayout(overrides: Partial<Layout> = {}): Partial<Layout> {
       ticks: "outside",
       tickcolor: C.line,
       ticklen: 4,
-      tickfont: { family: MONO, color: C.faint, size: 10 },
+      tickfont: { family: FONT, color: C.tick, size: 10 },
       showgrid: false,
       ...AXIS_SPIKE,
       ...(xaxis ?? {}),
@@ -90,7 +91,7 @@ function baseLayout(overrides: Partial<Layout> = {}): Partial<Layout> {
       linecolor: C.line,
       zeroline: false,
       showgrid: true,
-      tickfont: { family: MONO, color: C.faint, size: 10 },
+      tickfont: { family: FONT, color: C.tick, size: 10 },
       ...(yaxis ?? {}),
     },
     ...rest,
@@ -164,22 +165,22 @@ export function PriceEnvelopeChart({
     height,
     showlegend: true,
     // yanchor bottom: wrapped legend rows grow upward instead of covering the plot.
-    legend: { orientation: "h", x: 0, y: 1.02, yanchor: "bottom", font: { family: MONO, size: 11, color: C.muted } },
+    legend: { orientation: "h", x: 0, y: 1.02, yanchor: "bottom", font: { family: FONT, size: 11, color: C.muted } },
     margin: { l: 62, r: 18, t: 52, b: rangeslider ? 20 : 34 },
     yaxis: {
       gridcolor: C.grid,
       showgrid: true,
       zeroline: false,
       tickprefix: "$",
-      tickfont: { family: MONO, color: C.faint, size: 10 },
-      title: { text: metricLabel, font: { family: MONO, size: 10, color: C.faint } },
+      tickfont: { family: FONT, color: C.tick, size: 10 },
+      title: { text: metricLabel, font: { family: FONT, size: 10, color: C.muted } },
     },
     xaxis: {
       gridcolor: C.grid,
       showgrid: false,
       ...AXIS_SPIKE,
       rangeslider: rangeslider ? { visible: true, thickness: 0.08, bgcolor: "#f4f6f9", bordercolor: C.line } : { visible: false },
-      tickfont: { family: MONO, color: C.faint, size: 10 },
+      tickfont: { family: FONT, color: C.tick, size: 10 },
     },
   });
 
@@ -231,7 +232,7 @@ export function ProviderOrderBookChart({
         marker: { color: colors, line: { width: 0 } },
         text: xv.map(fmt),
         textposition: "auto",
-        textfont: { family: MONO, size: 10, color: "#ffffff" },
+        textfont: { family: FONT, size: 10, color: "#ffffff" },
         hovertemplate: kind === "price" ? "%{y}<br>$%{x:.4~f}/M<extra></extra>" : `%{y}<br>${isMoney ? "$" : ""}%{x:.3~s}/day<extra></extra>`,
       },
     ];
@@ -246,10 +247,10 @@ export function ProviderOrderBookChart({
       showgrid: true,
       zeroline: false,
       ...(isMoney ? { tickprefix: "$" } : {}),
-      tickfont: { family: MONO, color: C.faint, size: 10 },
+      tickfont: { family: FONT, color: C.tick, size: 10 },
       ...AXIS_SPIKE,
     },
-    yaxis: { showgrid: false, automargin: true, tickfont: { family: MONO, color: C.muted, size: 10.5 }, linecolor: C.line },
+    yaxis: { showgrid: false, automargin: true, tickfont: { family: FONT, color: C.tick, size: 10.5 }, linecolor: C.line },
   });
 
   return (
@@ -305,8 +306,8 @@ export function SpendTokensChart({ series, height = 300 }: { series: UsageSeries
   const layout = baseLayout({
     height,
     margin: { l: 60, r: 56, t: 12, b: 34 },
-    yaxis: { gridcolor: C.grid, showgrid: true, zeroline: false, tickfont: { family: MONO, color: C.amber, size: 10 }, tickprefix: "$", tickformat: ".2s" },
-    yaxis2: { overlaying: "y", side: "right", showgrid: false, zeroline: false, tickfont: { family: MONO, color: C.teal, size: 10 }, tickformat: ".2s" },
+    yaxis: { gridcolor: C.grid, showgrid: true, zeroline: false, tickfont: { family: FONT, color: C.amber, size: 10 }, tickprefix: "$", tickformat: ".2s" },
+    yaxis2: { overlaying: "y", side: "right", showgrid: false, zeroline: false, tickfont: { family: FONT, color: C.teal, size: 10 }, tickformat: ".2s" },
   });
 
   return <Plot data={data} layout={layout} config={baseConfig} className="plot" style={{ width: "100%", height }} useResizeHandler />;
@@ -435,7 +436,7 @@ export function WeeklyBarsChart({
       x: 0,
       y: 1.02,
       yanchor: "bottom",
-      font: { family: MONO, size: 10, color: C.muted },
+      font: { family: FONT, size: 10, color: C.muted },
       itemwidth: 30,
       traceorder: "normal",
     },
@@ -445,7 +446,7 @@ export function WeeklyBarsChart({
       gridcolor: C.grid,
       showgrid: true,
       zeroline: false,
-      tickfont: { family: MONO, color: leftColor, size: 10 },
+      tickfont: { family: FONT, color: leftColor, size: 10 },
       tickformat: ".2s",
       ...(showSpend ? { tickprefix: "$" } : {}),
     },
@@ -457,7 +458,7 @@ export function WeeklyBarsChart({
             showgrid: false,
             zeroline: false,
             rangemode: "tozero",
-            tickfont: { family: MONO, color: C.teal, size: 10 },
+            tickfont: { family: FONT, color: C.teal, size: 10 },
             tickformat: ".2s",
           },
         }
@@ -499,7 +500,7 @@ export function PriceIndexChart({
     ];
   }, [rows]);
 
-  const layout = baseLayout({ height, yaxis: { gridcolor: C.grid, showgrid: true, zeroline: false, tickprefix: "$", tickfont: { family: MONO, color: C.faint, size: 10 } } });
+  const layout = baseLayout({ height, yaxis: { gridcolor: C.grid, showgrid: true, zeroline: false, tickprefix: "$", tickfont: { family: FONT, color: C.tick, size: 10 } } });
   return <Plot data={data} layout={layout} config={baseConfig} className="plot" style={{ width: "100%", height }} useResizeHandler />;
 }
 
@@ -586,15 +587,15 @@ export function GpuBandChart({
   const layout = baseLayout({
     height,
     showlegend: true,
-    legend: { orientation: "h", x: 0, y: 1.02, yanchor: "bottom", font: { family: MONO, size: 11, color: C.muted } },
+    legend: { orientation: "h", x: 0, y: 1.02, yanchor: "bottom", font: { family: FONT, size: 11, color: C.muted } },
     margin: { l: 62, r: hasDepth ? 46 : 18, t: 46, b: 34 },
     yaxis: {
       gridcolor: C.grid,
       showgrid: true,
       zeroline: false,
       tickprefix: "$",
-      tickfont: { family: MONO, color: C.faint, size: 10 },
-      title: { text: "USD / GPU-hour", font: { family: MONO, size: 10, color: C.faint } },
+      tickfont: { family: FONT, color: C.tick, size: 10 },
+      title: { text: "USD / GPU-hour", font: { family: FONT, size: 10, color: C.muted } },
     },
     ...(hasDepth
       ? {
@@ -606,8 +607,8 @@ export function GpuBandChart({
             rangemode: "tozero",
             showgrid: false,
             zeroline: false,
-            tickfont: { family: MONO, color: "rgba(14,124,134,0.7)", size: 10 },
-            title: { text: "GPUs", font: { family: MONO, size: 10, color: "rgba(14,124,134,0.7)" } },
+            tickfont: { family: FONT, color: "rgba(14,124,134,0.7)", size: 10 },
+            title: { text: "GPUs", font: { family: FONT, size: 10, color: "rgba(14,124,134,0.7)" } },
           } as never,
         }
       : {}),
@@ -671,15 +672,15 @@ export function IntradayTapeChart({
   const layout = baseLayout({
     height,
     showlegend: true,
-    legend: { orientation: "h", x: 0, y: 1.02, yanchor: "bottom", font: { family: MONO, size: 11, color: C.muted } },
+    legend: { orientation: "h", x: 0, y: 1.02, yanchor: "bottom", font: { family: FONT, size: 11, color: C.muted } },
     margin: { l: 56, r: 46, t: 46, b: 34 },
     yaxis: {
       gridcolor: C.grid,
       showgrid: true,
       zeroline: false,
       tickprefix: "$",
-      tickfont: { family: MONO, color: C.faint, size: 10 },
-      title: { text: "USD / GPU-hour", font: { family: MONO, size: 10, color: C.faint } },
+      tickfont: { family: FONT, color: C.tick, size: 10 },
+      title: { text: "USD / GPU-hour", font: { family: FONT, size: 10, color: C.muted } },
     },
     // Depth axis: right side, no grid (the $ grid is the reading grid), and a
     // hard floor at zero so the bars sit on the axis instead of floating.
@@ -689,8 +690,8 @@ export function IntradayTapeChart({
       rangemode: "tozero",
       showgrid: false,
       zeroline: false,
-      tickfont: { family: MONO, color: "rgba(14,124,134,0.7)", size: 10 },
-      title: { text: "GPUs", font: { family: MONO, size: 10, color: "rgba(14,124,134,0.7)" } },
+      tickfont: { family: FONT, color: "rgba(14,124,134,0.7)", size: 10 },
+      title: { text: "GPUs", font: { family: FONT, size: 10, color: "rgba(14,124,134,0.7)" } },
     } as never,
   });
 
@@ -734,7 +735,7 @@ export function HourProfileChart({
   const layout = baseLayout({
     height,
     showlegend: true,
-    legend: { orientation: "h", x: 0, y: 1.02, yanchor: "bottom", font: { family: MONO, size: 11, color: C.muted } },
+    legend: { orientation: "h", x: 0, y: 1.02, yanchor: "bottom", font: { family: FONT, size: 11, color: C.muted } },
     margin: { l: 48, r: 18, t: 46, b: 40 },
     xaxis: {
       gridcolor: C.grid,
@@ -744,16 +745,16 @@ export function HourProfileChart({
       tickvals: [0, 3, 6, 9, 12, 15, 18, 21],
       ticktext: ["00", "03", "06", "09", "12", "15", "18", "21"],
       range: [-0.5, 23.5],
-      tickfont: { family: MONO, color: C.faint, size: 10 },
-      title: { text: "hour of day (UTC)", font: { family: MONO, size: 10, color: C.faint } },
+      tickfont: { family: FONT, color: C.tick, size: 10 },
+      title: { text: "hour of day (UTC)", font: { family: FONT, size: 10, color: C.muted } },
       ...AXIS_SPIKE,
     } as never,
     yaxis: {
       gridcolor: C.grid,
       showgrid: true,
       zeroline: false,
-      tickfont: { family: MONO, color: C.faint, size: 10 },
-      title: { text: "index (100 = typical hour)", font: { family: MONO, size: 10, color: C.faint } },
+      tickfont: { family: FONT, color: C.tick, size: 10 },
+      title: { text: "index (100 = typical hour)", font: { family: FONT, size: 10, color: C.muted } },
     },
     shapes: [
       {
@@ -825,14 +826,14 @@ export function ComputeVsTokensChart({
   const layout = baseLayout({
     height,
     showlegend: true,
-    legend: { orientation: "h", x: 0, y: 1.02, yanchor: "bottom", font: { family: MONO, size: 11, color: C.muted } },
+    legend: { orientation: "h", x: 0, y: 1.02, yanchor: "bottom", font: { family: FONT, size: 11, color: C.muted } },
     margin: { l: 52, r: 18, t: 46, b: 34 },
     yaxis: {
       gridcolor: C.grid,
       showgrid: true,
       zeroline: false,
-      tickfont: { family: MONO, color: C.faint, size: 10 },
-      title: { text: "index (start = 100)", font: { family: MONO, size: 10, color: C.faint } },
+      tickfont: { family: FONT, color: C.tick, size: 10 },
+      title: { text: "index (start = 100)", font: { family: FONT, size: 10, color: C.muted } },
     },
     shapes: [
       {
@@ -880,7 +881,7 @@ export function PriceHistoryChart({ rows, height = 300 }: { rows: PriceHistoryRo
     ];
   }, [rows]);
 
-  const layout = baseLayout({ height, yaxis: { gridcolor: C.grid, showgrid: true, zeroline: false, tickprefix: "$", tickfont: { family: MONO, color: C.faint, size: 10 } } });
+  const layout = baseLayout({ height, yaxis: { gridcolor: C.grid, showgrid: true, zeroline: false, tickprefix: "$", tickfont: { family: FONT, color: C.tick, size: 10 } } });
   return <Plot data={data} layout={layout} config={baseConfig} className="plot" style={{ width: "100%", height }} useResizeHandler />;
 }
 
@@ -916,8 +917,8 @@ export function UsageHistoryChart({ rows, height = 300 }: { rows: UsageRow[]; he
   const layout = baseLayout({
     height,
     margin: { l: 56, r: 56, t: 12, b: 34 },
-    yaxis: { gridcolor: C.grid, showgrid: true, zeroline: false, tickprefix: "$", tickformat: ".2s", tickfont: { family: MONO, color: C.amber, size: 10 } },
-    yaxis2: { overlaying: "y", side: "right", showgrid: false, zeroline: false, tickformat: ".2s", tickfont: { family: MONO, color: C.teal, size: 10 } },
+    yaxis: { gridcolor: C.grid, showgrid: true, zeroline: false, tickprefix: "$", tickformat: ".2s", tickfont: { family: FONT, color: C.amber, size: 10 } },
+    yaxis2: { overlaying: "y", side: "right", showgrid: false, zeroline: false, tickformat: ".2s", tickfont: { family: FONT, color: C.teal, size: 10 } },
   });
   return <Plot data={data} layout={layout} config={baseConfig} className="plot" style={{ width: "100%", height }} useResizeHandler />;
 }
@@ -978,7 +979,7 @@ export function WeeklyRaceChart({
     showlegend: true,
     // Anchor the legend's bottom above the plot so its ~4 wrapped rows grow
     // into the top margin instead of down over the traces.
-    legend: { orientation: "h", x: 0, y: 1.02, yanchor: "bottom", font: { family: MONO, size: 9.5, color: C.muted } },
+    legend: { orientation: "h", x: 0, y: 1.02, yanchor: "bottom", font: { family: FONT, size: 9.5, color: C.muted } },
     margin: { l: 52, r: 12, t: 86, b: 34 },
     yaxis: {
       gridcolor: C.grid,
@@ -986,7 +987,7 @@ export function WeeklyRaceChart({
       zeroline: false,
       tickformat: ".2s",
       ...(mode === "spend" ? { tickprefix: "$" } : {}),
-      tickfont: { family: MONO, color: C.faint, size: 10 },
+      tickfont: { family: FONT, color: C.tick, size: 10 },
     },
   });
   return <Plot data={data} layout={layout} config={baseConfig} className="plot" style={{ width: "100%", height }} useResizeHandler />;
@@ -1025,16 +1026,16 @@ export function ProviderRevenueChart({
   const layout = baseLayout({
     height,
     showlegend: true,
-    legend: { orientation: "h", x: 0, y: 1.02, yanchor: "bottom", font: { family: MONO, size: 10, color: C.muted } },
+    legend: { orientation: "h", x: 0, y: 1.02, yanchor: "bottom", font: { family: FONT, size: 10, color: C.muted } },
     margin: { l: 56, r: 14, t: 46, b: 34 },
     yaxis: {
       gridcolor: C.grid,
       showgrid: true,
       zeroline: false,
       ...(mode === "spend" ? { tickprefix: "$" } : {}),
-      tickfont: { family: MONO, color: C.faint, size: 10 },
+      tickfont: { family: FONT, color: C.tick, size: 10 },
     },
-    xaxis: { gridcolor: C.grid, showgrid: false, ...AXIS_SPIKE, tickfont: { family: MONO, color: C.faint, size: 10 } },
+    xaxis: { gridcolor: C.grid, showgrid: false, ...AXIS_SPIKE, tickfont: { family: FONT, color: C.tick, size: 10 } },
   });
 
   return <Plot data={data} layout={layout} config={baseConfig} className="plot" style={{ width: "100%", height }} useResizeHandler />;

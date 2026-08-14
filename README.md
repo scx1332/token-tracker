@@ -93,7 +93,7 @@ estimated spend is computed from the model's current price.
   `serve` (HTTP API), `backfill` (one‑shot deep history). Idempotent schema with a
   per‑schema advisory lock so `ingest` and `backend` can create it concurrently.
 - **Frontend** (`frontend/`): Vite + React 18 + Plotly, styled as a light,
-  technical analytics workstation (Archivo + IBM Plex Mono; teal = tokens, amber =
+  technical analytics workstation (the native system sans-serif; teal = tokens, amber =
   dollars, indigo = price). The **Price Explorer** lets you pick any model and
   follow its price across every provider over time — the bold line is the
   cheapest provider (the *minimum*), inside the min–max spread band, with a live
