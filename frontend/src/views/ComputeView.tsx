@@ -33,6 +33,9 @@ const TIER_LABEL: Record<string, string> = {
 
 const TIER_ORDER = ["flagship", "datacenter", "prosumer"];
 
+/** Days of daily history before the rental-price chart trades sweeps for dailies. */
+const DAILY_MIN_DAYS = 7;
+
 /** $/GPU-hour to 3dp — rentals span $0.06 to $10, so a fixed 3 reads cleanly. */
 function gpuHr(v: number | null | undefined): string {
   if (v === null || v === undefined || !Number.isFinite(v)) return "—";
@@ -85,6 +88,23 @@ export function ComputeView({ navigate: _navigate }: { navigate: (to: string) =>
 
   const dailyByGpu = useMemo(() => groupDailyByGpu(dailyAll ?? []), [dailyAll]);
   const dailySelected = dailyByGpu.get(selected) ?? [];
+
+  // Daily bands are the long-run view, but with under a week of history a daily
+  // chart is two lonely points. Until then, chart every 15-min sweep instead —
+  // the detail exists, so show it. Daily takes over once it can carry the story.
+  const bandHourly = dailySelected.length < DAILY_MIN_DAYS;
+  const bandPoints = useMemo(() => {
+    const rows = hourly ?? [];
+    if (!bandHourly || !rows.length) return dailySelected;
+    return rows.map((r) => ({
+      date: r.capturedAt,
+      minUsd: r.minUsd,
+      medianUsd: r.medianUsd,
+      p25Usd: r.p25Usd,
+      p75Usd: r.p75Usd,
+    }));
+    // dailySelected is derived per render; selected covers it in the dep list.
+  }, [bandHourly, hourly, dailyAll, selected]);
 
   const comparison = useMemo(
     () => buildComparison(priceIndex ?? [], dailySelected, metric),
@@ -261,22 +281,26 @@ export function ComputeView({ navigate: _navigate }: { navigate: (to: string) =>
         )}
       </Panel>
 
-      {/* Per-accelerator daily price history */}
+      {/* Per-accelerator price history — sweep-level until dailies have depth */}
       <Panel className="chart-card">
         <div className="chart-head">
           <div>
             <div className="chart-title">{selectedMeta?.label ?? selected} rental price</div>
             <div className="chart-note mono">
               {selectedMeta ? `${selectedMeta.vramGb}GB · ${TIER_LABEL[selectedMeta.tier] ?? selectedMeta.tier}` : ""}
-              {dailySelected.length ? ` · ${dailySelected.length} days · daily aggregate of all sweeps` : ""}
+              {bandHourly
+                ? ` · every 15-min sweep (${bandPoints.length}) · daily bands take over after ${DAILY_MIN_DAYS} days of history`
+                : dailySelected.length
+                  ? ` · ${dailySelected.length} days · daily aggregate of all sweeps`
+                  : ""}
             </div>
           </div>
         </div>
-        {dailySelected.length > 1 ? (
-          <GpuBandChart points={dailySelected} height={340} />
+        {bandPoints.length > 1 ? (
+          <GpuBandChart points={bandPoints} height={340} />
         ) : (
           <div className="empty">
-            Only {dailySelected.length} day of history so far — the series fills in from first ingest.
+            Only {bandPoints.length} sweep of history so far — the series fills in from first ingest.
           </div>
         )}
       </Panel>

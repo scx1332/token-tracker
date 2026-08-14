@@ -384,7 +384,10 @@ export function WeeklyBarsChart({
             if (v === null) return "";
             const total = y[i] ?? 0;
             const share = w.complete && total > 0 ? ` · ${Math.round((v / total) * 100)}% of wk` : "";
-            return `${label} ${w.byDay[dow]?.date ?? w.weekStart}<br>${fmt(v)}${share}`;
+            // Every segment repeats the week total — with per-rectangle hover
+            // there is no other place to read the height of the whole stack.
+            const week = total > 0 ? `<br>week ${w.complete ? "total" : `so far, ${w.days}d`}: ${fmt(total)}` : "";
+            return `${label} ${w.byDay[dow]?.date ?? w.weekStart}<br>${fmt(v)}${share}${week}`;
           }),
           hovertemplate: "%{hovertext}<extra></extra>",
         }, group),
@@ -562,7 +565,9 @@ export function GpuBandChart({
     });
     traces.push({
       type: "scatter",
-      mode: "lines+markers",
+      // Markers make sparse series readable; past a few hundred points (the
+      // 15-min sweep tape) they fuse into a rope, so lines only.
+      mode: points.length <= 300 ? "lines+markers" : "lines",
       name: "Cheapest offer",
       x,
       y: points.map((p) => p.minUsd),
