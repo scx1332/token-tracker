@@ -12,6 +12,7 @@ const BACKEND_HOST = process.env.BACKEND_HOST ?? "backend";
 const BACKEND_PORT = Number.parseInt(process.env.BACKEND_PORT ?? "3000", 10);
 const STATIC_DIR = path.resolve(__dirname, "dist");
 const INDEX_FILE = path.join(STATIC_DIR, "index.html");
+const ASSETS_DIR = path.join(STATIC_DIR, "assets");
 
 const MIME_TYPES = {
   ".html": "text/html; charset=utf-8",
@@ -37,8 +38,34 @@ function mimeFor(filePath) {
   return MIME_TYPES[path.extname(filePath).toLowerCase()] ?? "application/octet-stream";
 }
 
-function sendFile(filePath, res, { status = 200 } = {}) {
-  res.writeHead(status, { "content-type": mimeFor(filePath) });
+function cacheControlFor(filePath) {
+  // Vite fingerprints everything under assets/, so those files may live in the
+  // browser cache forever. index.html (and anything else unhashed) must be
+  // revalidated on every load, or a deploy strands browsers on bundle URLs
+  // that no longer exist.
+  return filePath.startsWith(ASSETS_DIR + path.sep)
+    ? "public, max-age=31536000, immutable"
+    : "no-cache";
+}
+
+function sendFile(req, res, filePath, stats) {
+  const lastModified = stats.mtime.toUTCString();
+  const headers = {
+    "content-type": mimeFor(filePath),
+    "cache-control": cacheControlFor(filePath),
+    "last-modified": lastModified,
+  };
+  if (req.headers["if-modified-since"] === lastModified) {
+    res.writeHead(304, headers);
+    res.end();
+    return;
+  }
+  headers["content-length"] = stats.size;
+  res.writeHead(200, headers);
+  if (req.method === "HEAD") {
+    res.end();
+    return;
+  }
   const stream = createReadStream(filePath);
   stream.on("error", () => {
     if (!res.headersSent) {
@@ -94,7 +121,7 @@ async function serveStatic(req, res) {
   try {
     const stats = await stat(candidate);
     if (stats.isFile()) {
-      sendFile(candidate, res);
+      sendFile(req, res, candidate, stats);
       return;
     }
   } catch {
@@ -102,8 +129,8 @@ async function serveStatic(req, res) {
   }
 
   try {
-    await stat(INDEX_FILE);
-    sendFile(INDEX_FILE, res, { status: 200 });
+    const stats = await stat(INDEX_FILE);
+    sendFile(req, res, INDEX_FILE, stats);
   } catch {
     res.writeHead(404, { "content-type": "text/plain" });
     res.end("Not found");
