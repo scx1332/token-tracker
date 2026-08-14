@@ -3,6 +3,13 @@
 
 import type { UsageSeriesPoint } from "./api";
 
+export interface WeekDayCell {
+  /** YYYY-MM-DD. */
+  date: string;
+  spendUsd: number;
+  tokens: number;
+}
+
 export interface WeekBucket {
   /** Monday of the week, YYYY-MM-DD. */
   weekStart: string;
@@ -13,6 +20,8 @@ export interface WeekBucket {
   /** Days of data present — a partial week is priced lower for a boring reason. */
   days: number;
   complete: boolean;
+  /** Per-weekday breakdown, index 0 = Monday; null = no data for that day. */
+  byDay: (WeekDayCell | null)[];
 }
 
 const DAY_MS = 86_400_000;
@@ -48,12 +57,19 @@ export function toWeeklyBuckets(series: UsageSeriesPoint[]): WeekBucket[] {
         tokens: 0,
         days: 0,
         complete: false,
+        byDay: new Array(7).fill(null),
       };
       byWeek.set(weekStart, bucket);
     }
     bucket.spendUsd += point.totalSpendUsd ?? 0;
     bucket.tokens += point.totalTokens ?? 0;
-    bucket.days += 1;
+    const dow = (new Date(toUtc(point.bucketDate)).getUTCDay() + 6) % 7;
+    const cell = bucket.byDay[dow] ?? { date: point.bucketDate.slice(0, 10), spendUsd: 0, tokens: 0 };
+    cell.spendUsd += point.totalSpendUsd ?? 0;
+    cell.tokens += point.totalTokens ?? 0;
+    bucket.byDay[dow] = cell;
+    // Days = distinct weekdays seen, so a duplicate row can't fake a full week.
+    bucket.days = bucket.byDay.reduce((n, c) => n + (c ? 1 : 0), 0);
     bucket.complete = bucket.days >= 7;
   }
   return [...byWeek.values()].sort((a, b) => a.weekStart.localeCompare(b.weekStart));

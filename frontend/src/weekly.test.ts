@@ -69,6 +69,24 @@ describe("toWeeklyBuckets", () => {
   it("ignores rows without a date", () => {
     expect(toWeeklyBuckets([{ bucketDate: "", totalSpendUsd: 1, totalTokens: 1, modelCount: 1 }])).toEqual([]);
   });
+
+  it("keeps the per-day breakdown, Monday-indexed with nulls for gaps", () => {
+    const weeks = toWeeklyBuckets([
+      day("2026-08-04", 3, 30), // Tuesday
+      day("2026-08-09", 7, 70), // Sunday
+    ]);
+    const byDay = weeks[0]!.byDay;
+    expect(byDay).toHaveLength(7);
+    expect(byDay[0]).toBeNull();
+    expect(byDay[1]).toEqual({ date: "2026-08-04", spendUsd: 3, tokens: 30 });
+    expect(byDay[6]).toEqual({ date: "2026-08-09", spendUsd: 7, tokens: 70 });
+  });
+
+  it("merges duplicate rows for one date without double-counting the day", () => {
+    const weeks = toWeeklyBuckets([day("2026-08-04", 3, 30), day("2026-08-04T12:00:00Z", 2, 20)]);
+    expect(weeks[0]).toMatchObject({ days: 1, spendUsd: 5, complete: false });
+    expect(weeks[0]!.byDay[1]).toEqual({ date: "2026-08-04", spendUsd: 5, tokens: 50 });
+  });
 });
 
 // Four identical weeks: 10/day Mon–Fri, 5/day Sat–Sun (week total 60).

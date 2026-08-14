@@ -3,7 +3,7 @@ import Plotly from "plotly.js-dist-min";
 import type { Layout, Config, Data } from "plotly.js-dist-min";
 import { useMemo } from "react";
 import type { PriceHistoryRow, UsageRow, UsageSeriesPoint } from "./api";
-import type { WeekBucket } from "./weekly";
+import type { WeekBucket, WeekDayCell } from "./weekly";
 
 export const Plot = createPlotlyComponent(Plotly);
 
@@ -320,11 +320,18 @@ function barGrouping<T extends object>(trace: T, group: string): Data {
   return { ...trace, offsetgroup: group, alignmentgroup: "week" } as unknown as Data;
 }
 
+const DAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+// Shade ramp inside a weekly bar: Monday darkest → Sunday lightest, so the
+// weekend's smaller share reads at a glance and neighbours stay tellable apart.
+const DAY_ALPHAS = [0.95, 0.86, 0.77, 0.68, 0.59, 0.46, 0.36];
+
 /**
- * The same market series summed into Mon–Sun weeks. Daily spend carries a
- * weekday cycle that hides the trend; weekly bars remove it. In "both" the two
- * metrics stand side by side on their own axes. The week in progress is drawn
- * hollow with a hatched cap on top — that cap is the projected remainder.
+ * The same market series summed into Mon–Sun weeks, each bar stacked from its
+ * seven day-rectangles (Monday at the bottom). Daily spend carries a weekday
+ * cycle that hides the trend; weekly bars remove it, and the stack keeps the
+ * day-level texture without a second chart. In "both" the two metrics stand
+ * side by side on their own axes. The week in progress simply has fewer
+ * segments, with a hatched cap on top — that cap is the projected remainder.
  */
 export function WeeklyBarsChart({
   weeks,
@@ -352,24 +359,36 @@ export function WeeklyBarsChart({
       const fmt = metric === "spend" ? money : vol;
       const y = weeks.map((w) => (metric === "spend" ? w.spendUsd : w.tokens));
       const axis = metric === "spend" || mode === "tokens" ? "y" : "y2";
-      // Same offsetgroup = stacked (booked + projection); different offsetgroups
-      // sit side by side, which is how two axes share one set of week slots.
+      // Same offsetgroup = stacked (the 7 day segments + projection); different
+      // offsetgroups sit side by side, which is how two axes share week slots.
       const group = metric;
-      const traces: Data[] = [
+      const cellValue = (cell: WeekDayCell | null | undefined) =>
+        cell == null ? null : metric === "spend" ? cell.spendUsd : cell.tokens;
+      // One trace per weekday: within a week slot they stack Mon (bottom) → Sun.
+      // The legend is drawn from a single metric's set — the day names apply to both.
+      const traces: Data[] = DAY_LABELS.map((label, dow) =>
         barGrouping({
           type: "bar",
-          name: metric === "spend" ? "Est. spend" : "Tokens",
+          name: label,
+          legendgroup: label,
+          showlegend: metric === "spend" || mode === "tokens",
           x,
-          y,
+          y: weeks.map((w) => cellValue(w.byDay[dow])),
           yaxis: axis,
           marker: {
-            color: weeks.map((w) => (w.complete ? hexToRgba(color, 0.85) : hexToRgba(color, 0.22))),
-            line: { color, width: weeks.map((w) => (w.complete ? 0 : 1.4)) as unknown as number },
+            color: hexToRgba(color, DAY_ALPHAS[dow] ?? 0.5),
+            line: { color: "#ffffff", width: 0.6 },
           },
-          hovertext: weeks.map((w, i) => `${w.weekStart} → ${w.weekEnd}<br>${fmt(y[i] ?? 0)}${w.complete ? "" : `<br>${w.days} of 7 days booked`}`),
+          hovertext: weeks.map((w, i) => {
+            const v = cellValue(w.byDay[dow]);
+            if (v === null) return "";
+            const total = y[i] ?? 0;
+            const share = w.complete && total > 0 ? ` · ${Math.round((v / total) * 100)}% of wk` : "";
+            return `${label} ${w.byDay[dow]?.date ?? w.weekStart}<br>${fmt(v)}${share}`;
+          }),
           hovertemplate: "%{hovertext}<extra></extra>",
         }, group),
-      ];
+      );
 
       const full = (metric === "spend" ? projected?.spend : projected?.tokens) ?? null;
       if (last && !last.complete && full !== null) {
@@ -403,8 +422,20 @@ export function WeeklyBarsChart({
     barmode: "stack",
     bargap: 0.3,
     bargroupgap: 0.12,
-    margin: { l: 60, r: mode === "both" ? 58 : 16, t: 12, b: 46 },
+    margin: { l: 60, r: mode === "both" ? 58 : 16, t: 30, b: 46 },
     hovermode: "closest",
+    // Mon…Sun legend doubles as the shade key; clicking a day hides it in
+    // every week (legendgroup ties the spend and tokens copies together).
+    showlegend: true,
+    legend: {
+      orientation: "h",
+      x: 0,
+      y: 1.02,
+      yanchor: "bottom",
+      font: { family: MONO, size: 10, color: C.muted },
+      itemwidth: 30,
+      traceorder: "normal",
+    },
     // One tick per week slot, on the Monday it starts.
     xaxis: { type: "date", tickformat: "%b %-d", tickmode: "array", tickvals: weeks.map((w) => w.weekStart), tickangle: -45 },
     yaxis: {
