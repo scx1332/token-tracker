@@ -508,59 +508,64 @@ export function PriceIndexChart({
 // ---------------------------------------------------------------------------
 
 /**
- * One accelerator's rental price over time: the p25–p75 body of the offer book
- * as a band, the median through it, and the cheapest rentable offer as the hero
- * line. Same visual grammar as the token PriceEnvelopeChart — cheapest is the
- * strong blue, spread is the faint fill — so the two markets read alike.
+ * One accelerator's rental price over time. The hero line is the 25th-percentile
+ * ask — a quarter into the fenced book, offer #10 of a 40-offer book — because
+ * the single cheapest box is one lucky host that gets rented away in minutes,
+ * while a quarter in is a price still standing an hour later. Cheapest → median
+ * frame it as a quiet band, and supply bars sit under everything on a second
+ * axis so price moves read against book depth.
  */
 export function GpuBandChart({
   points,
   height = 340,
-  showBand = true,
 }: {
-  points: { date: string; minUsd: number | null; medianUsd: number | null; p25Usd: number | null; p75Usd: number | null }[];
+  points: {
+    date: string;
+    minUsd: number | null;
+    medianUsd: number | null;
+    p25Usd: number | null;
+    gpusAvailable?: number;
+  }[];
   height?: number;
-  showBand?: boolean;
 }) {
+  const hasDepth = points.some((p) => (p.gpusAvailable ?? 0) > 0);
+
   const data = useMemo<Data[]>(() => {
     const x = points.map((p) => p.date);
     const traces: Data[] = [];
-    const bandVisible =
-      showBand &&
-      points.some((p) => p.p25Usd != null && p.p75Usd != null && p.p75Usd > p.p25Usd + 1e-12);
 
-    if (bandVisible) {
+    if (hasDepth) {
       traces.push({
-        type: "scatter",
-        mode: "lines",
-        name: "p25",
+        type: "bar",
+        name: "GPUs on offer",
         x,
-        y: points.map((p) => p.p25Usd),
-        line: { width: 0 },
-        hoverinfo: "skip",
-        showlegend: false,
-      });
-      traces.push({
-        type: "scatter",
-        mode: "lines",
-        name: "Middle 50% of offers",
-        x,
-        y: points.map((p) => p.p75Usd),
-        line: { width: 0 },
-        fill: "tonexty",
-        fillcolor: "rgba(43,52,204,0.07)",
-        hovertemplate: "p75 $%{y:.3~f}/GPU-hr<extra></extra>",
-        showlegend: true,
+        y: points.map((p) => p.gpusAvailable ?? null),
+        yaxis: "y2",
+        marker: { color: "rgba(14,124,134,0.18)" },
+        hovertemplate: "%{y} GPUs<extra>depth</extra>",
       });
     }
 
+    // Band edges: cheapest below, median above, quiet fill between them. The
+    // median must follow the min in this array — tonexty pairs neighbours.
+    traces.push({
+      type: "scatter",
+      mode: "lines",
+      name: "Cheapest offer",
+      x,
+      y: points.map((p) => p.minUsd),
+      line: { color: C.indigo, width: 1.1 },
+      hovertemplate: "$%{y:.3~f}/GPU-hr<extra>min</extra>",
+    });
     traces.push({
       type: "scatter",
       mode: "lines",
       name: "Median offer",
       x,
       y: points.map((p) => p.medianUsd),
-      line: { color: C.indigo, width: 1.6, dash: "dot" },
+      line: { color: C.indigo, width: 1.1, dash: "dot" },
+      fill: "tonexty",
+      fillcolor: "rgba(43,52,204,0.07)",
       hovertemplate: "$%{y:.3~f}/GPU-hr<extra>median</extra>",
     });
     traces.push({
@@ -568,21 +573,21 @@ export function GpuBandChart({
       // Markers make sparse series readable; past a few hundred points (the
       // 15-min sweep tape) they fuse into a rope, so lines only.
       mode: points.length <= 300 ? "lines+markers" : "lines",
-      name: "Cheapest offer",
+      name: "P25 offer — ¼ into the book",
       x,
-      y: points.map((p) => p.minUsd),
+      y: points.map((p) => p.p25Usd),
       line: { color: C.min, width: 2.4 },
       marker: { size: 4, color: C.min },
-      hovertemplate: "$%{y:.3~f}/GPU-hr<extra>min</extra>",
+      hovertemplate: "$%{y:.3~f}/GPU-hr<extra>p25</extra>",
     });
     return traces;
-  }, [points, showBand]);
+  }, [points, hasDepth]);
 
   const layout = baseLayout({
     height,
     showlegend: true,
     legend: { orientation: "h", x: 0, y: 1.02, yanchor: "bottom", font: { family: MONO, size: 11, color: C.muted } },
-    margin: { l: 62, r: 18, t: 46, b: 34 },
+    margin: { l: 62, r: hasDepth ? 46 : 18, t: 46, b: 34 },
     yaxis: {
       gridcolor: C.grid,
       showgrid: true,
@@ -591,6 +596,21 @@ export function GpuBandChart({
       tickfont: { family: MONO, color: C.faint, size: 10 },
       title: { text: "USD / GPU-hour", font: { family: MONO, size: 10, color: C.faint } },
     },
+    ...(hasDepth
+      ? {
+          // Depth axis: right side, no grid (the $ grid is the reading grid), and
+          // a hard floor at zero so the bars sit on the axis instead of floating.
+          yaxis2: {
+            overlaying: "y",
+            side: "right",
+            rangemode: "tozero",
+            showgrid: false,
+            zeroline: false,
+            tickfont: { family: MONO, color: "rgba(14,124,134,0.7)", size: 10 },
+            title: { text: "GPUs", font: { family: MONO, size: 10, color: "rgba(14,124,134,0.7)" } },
+          } as never,
+        }
+      : {}),
   });
 
   return <Plot data={data} layout={layout} config={baseConfig} className="plot" style={{ width: "100%", height }} useResizeHandler />;

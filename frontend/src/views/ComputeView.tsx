@@ -101,7 +101,7 @@ export function ComputeView({ navigate: _navigate }: { navigate: (to: string) =>
       minUsd: r.minUsd,
       medianUsd: r.medianUsd,
       p25Usd: r.p25Usd,
-      p75Usd: r.p75Usd,
+      gpusAvailable: r.gpusAvailable,
     }));
     // dailySelected is derived per render; selected covers it in the dep list.
   }, [bandHourly, hourly, dailyAll, selected]);
@@ -297,7 +297,15 @@ export function ComputeView({ navigate: _navigate }: { navigate: (to: string) =>
           </div>
         </div>
         {bandPoints.length > 1 ? (
-          <GpuBandChart points={bandPoints} height={340} />
+          <>
+            <GpuBandChart points={bandPoints} height={340} />
+            <div className="inline-note">
+              The main line is the <b>25th-percentile ask</b> — in a 40-offer book, offer #10. The
+              single cheapest box is often one lucky host and gets rented away in minutes; a quarter
+              into the book is the price you can still get an hour later. The band spans cheapest →
+              median, and the teal bars are GPUs on offer — price moves read against supply.
+            </div>
+          </>
         ) : (
           <div className="empty">
             Only {bandPoints.length} sweep of history so far — the series fills in from first ingest.
