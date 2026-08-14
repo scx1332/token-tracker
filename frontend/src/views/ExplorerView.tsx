@@ -23,6 +23,9 @@ const RANGES: { label: string; days: number | null }[] = [
   { label: "All", days: null },
 ];
 
+/** Providers carrying at least this share of live traffic get a line automatically. */
+const AUTO_SHARE = 0.05;
+
 export function ExplorerView({
   modelId: initialModel,
   provider: initialProvider,
@@ -36,10 +39,14 @@ export function ExplorerView({
   const [error, setError] = useState<string | null>(null);
 
   const [modelId, setModelId] = useState<string | null>(initialModel ?? null);
-  // Multi-select: each pinned provider gets its own line. Empty = min across all.
+  // Providers with real traffic (≥AUTO_SHARE) are charted automatically.
+  // `selected` pins extras on top of that (and is what deep links carry);
+  // `muted` hides an auto/pinned line the user clicked off. A provider is on
+  // the chart iff (auto ∪ pinned) ∖ muted.
   const [selected, setSelected] = useState<string[]>(
     initialProvider ? initialProvider.split(",").map((s) => s.trim()).filter(Boolean) : [],
   );
+  const [muted, setMuted] = useState<string[]>([]);
   const [metric, setMetric] = useState<Metric>("blended");
   const [days, setDays] = useState<number | null>(null);
 
@@ -77,6 +84,7 @@ export function ExplorerView({
     setPriceData(null);
     setDetail(null);
     setVolume(null);
+    setMuted([]); // mutes are per-model: another model has different auto lines
     // Live traffic is best-effort — the explorer works without it.
     api
       .providerVolume(modelId)
@@ -106,8 +114,6 @@ export function ExplorerView({
     if (window.location.hash !== target) window.history.replaceState(null, "", target);
   }, [modelId, selected]);
 
-  const toggleProvider = (p: string) =>
-    setSelected((cur) => (cur.includes(p) ? cur.filter((x) => x !== p) : [...cur, p]));
 
   const points = priceData?.points ?? [];
   const rangedPoints = useMemo(() => {
@@ -183,6 +189,43 @@ export function ExplorerView({
 
   const envelope = useMemo(() => minEnvelope(shownPoints, metric), [shownPoints, metric]);
 
+  // The providers that get a line automatically: the ones actually carrying
+  // traffic (≥AUTO_SHARE of requests), most popular first so colors rank by
+  // share. Names must exist on the pricing side or there is nothing to draw.
+  const autoProviders = useMemo(() => {
+    const byName = new Map(allProviders.map((p) => [p.toLowerCase(), p]));
+    return volumeRows
+      .filter((r) => r.share >= AUTO_SHARE)
+      .sort((a, b) => b.share - a.share)
+      .map((r) => byName.get(r.provider.toLowerCase()))
+      .filter((p): p is string => p !== undefined);
+  }, [volumeRows, allProviders]);
+
+  // On the chart: popular providers plus pins, minus anything clicked off.
+  const shownProviders = useMemo(() => {
+    const mutedSet = new Set(muted);
+    const extra = selected.filter((p) => !autoProviders.includes(p) && allProviders.includes(p));
+    return [...autoProviders, ...extra].filter((p) => !mutedSet.has(p));
+  }, [autoProviders, selected, muted, allProviders]);
+
+  // Clicking any provider (chip, order book, table) toggles its line: shown →
+  // hidden; hidden → shown (pinning it if it isn't popular enough to be auto).
+  const toggleProvider = (p: string) => {
+    if (shownProviders.includes(p)) {
+      setMuted((cur) => [...cur, p]);
+    } else {
+      setMuted((cur) => cur.filter((x) => x !== p));
+      if (!autoProviders.includes(p)) {
+        setSelected((cur) => (cur.includes(p) ? cur : [...cur, p]));
+      }
+    }
+  };
+
+  const resetProviders = () => {
+    setSelected([]);
+    setMuted([]);
+  };
+
   // A quote holds until it changes, so carry the latest values forward to "now"
   // for the chart — a single observation reads as a held-price line, not a dot.
   const chartEnv = useMemo(() => {
@@ -195,7 +238,7 @@ export function ExplorerView({
   const providerLines = useMemo(() => {
     const now = new Date().toISOString();
     const lines: { name: string; x: string[]; y: (number | null)[]; color: string }[] = [];
-    selected.forEach((name, i) => {
+    shownProviders.forEach((name, i) => {
       const rows = seriesForProvider(rangedPoints, name);
       if (!rows.length) return;
       const x = rows.map((r) => r.observedAt);
@@ -207,14 +250,12 @@ export function ExplorerView({
       lines.push({ name, x, y, color: PROVIDER_COLORS[i % PROVIDER_COLORS.length]! });
     });
     return lines;
-  }, [rangedPoints, selected, metric]);
+  }, [rangedPoints, shownProviders, metric]);
 
   const latest = envelope[envelope.length - 1] ?? null;
   const minNow = latest?.min ?? null;
   const cheapestNow = latest?.cheapest ?? null;
-  const spreadNow = latest && latest.min != null && latest.max != null ? latest.max - latest.min : null;
   const change = envelopeChange(envelope, "min");
-  const selectedQuote = selected.length === 1 ? orderBook.find((q) => q.provider === selected[0]) ?? null : null;
 
   const model = detail?.model ?? models?.find((m) => m.modelId === modelId) ?? null;
 
@@ -233,7 +274,8 @@ export function ExplorerView({
         </div>
         <p className="view-sub">
           Track the <b>minimum</b> price for any model over time and compare the companies serving it. The bold line is
-          the cheapest provider; the band is the full spread from cheapest to dearest.
+          the cheapest provider; providers carrying more than {Math.round(AUTO_SHARE * 100)}% of the model's traffic get
+          their own line automatically — click any provider to show or hide it.
         </p>
       </div>
 
@@ -244,13 +286,20 @@ export function ExplorerView({
           <ModelChips models={models} value={modelId} onChange={setModelId} />
         </div>
         <div className="ctl ctl-wide">
-          <label className="ctl-label">Providers — pick any number, each gets its own line</label>
+          <label className="ctl-label">
+            Providers — &gt;{Math.round(AUTO_SHARE * 100)}% of live traffic (trailing ~30 min) charted automatically ·
+            click to show/hide
+          </label>
           <div className="chip-row">
-            <button className={`chip${selected.length === 0 ? " active" : ""}`} onClick={() => setSelected([])}>
-              All · minimum
+            <button
+              className={`chip${selected.length === 0 && muted.length === 0 ? " active" : ""}`}
+              onClick={resetProviders}
+              title="Reset to the automatic set: providers carrying real traffic"
+            >
+              Auto · popular
             </button>
             {providers.map((p) => {
-              const idx = selected.indexOf(p);
+              const idx = shownProviders.indexOf(p);
               const color = idx >= 0 ? PROVIDER_COLORS[idx % PROVIDER_COLORS.length] : undefined;
               return (
                 <button
@@ -291,23 +340,21 @@ export function ExplorerView({
       <div className="explorer-stats">
         <StatBox label={`Minimum ${METRIC_LABEL[metric].toLowerCase()}`} value={minNow == null ? "—" : mtok(minNow)} accent="min" foot={cheapestNow ? `cheapest · ${cheapestNow}` : "no priced provider"} />
         <StatBox
-          label={selected.length > 1 ? "Providers compared" : "Selected provider"}
-          value={
-            selected.length === 0
-              ? "All"
-              : selected.length === 1
-                ? selectedQuote?.value == null
-                  ? "—"
-                  : mtok(selectedQuote.value)
-                : String(selected.length)
+          label="Lines on chart"
+          value={shownProviders.length === 0 ? "Min only" : String(shownProviders.length)}
+          foot={
+            shownProviders.length === 0
+              ? "no provider above the traffic bar"
+              : shownProviders.length <= 3
+                ? shownProviders.join(" · ")
+                : `${shownProviders.slice(0, 2).join(" · ")} +${shownProviders.length - 2}`
           }
-          foot={selected.length === 0 ? "showing the floor" : selected.length === 1 ? selected[0]! : selected.join(" · ")}
           accent="teal"
         />
         <StatBox
           label={activeSet ? "Providers used" : "Providers serving"}
           value={String(shownBook.filter((q) => q.value != null).length || providers.length)}
-          foot={`${spreadNow != null ? `spread ${mtok(spreadNow)}` : "single quote"}${activeSet ? ` · ${"\u2265"}1% of traffic` : ""}`}
+          foot={activeSet ? `carrying ${"\u2265"}1% of traffic` : "no live traffic data"}
         />
         <StatBox
           label="Min change · window"
@@ -327,9 +374,11 @@ export function ExplorerView({
             </div>
             <div className="chart-note mono">
               {METRIC_LABEL[metric]} ·{" "}
-              {selected.length === 0
+              {shownProviders.length === 0
                 ? "minimum across providers"
-                : `min vs ${selected.length <= 2 ? selected.join(", ") : `${selected.length} providers`}`}
+                : `min + ${
+                    shownProviders.length <= 2 ? shownProviders.join(", ") : `${shownProviders.length} providers by traffic`
+                  }`}
             </div>
           </div>
           {model && (
@@ -352,7 +401,6 @@ export function ExplorerView({
             <PriceEnvelopeChart
               x={x}
               min={chartEnv.map((e) => e.min)}
-              max={chartEnv.map((e) => e.max)}
               cheapest={chartEnv.map((e) => e.cheapest)}
               providers={providerLines}
               metricLabel={METRIC_LABEL[metric]}
@@ -361,8 +409,7 @@ export function ExplorerView({
             />
             {envelope.length < 2 && (
               <div className="inline-note mono">
-                Only one price observation so far — the line fills in as prices change. The cross-provider spread below is
-                live now.
+                Only one price observation so far — the lines fill in as prices change. The order book below is live now.
               </div>
             )}
           </>
@@ -395,18 +442,18 @@ export function ExplorerView({
           </div>
           {bookMode === "price" ? (
             shownBook.some((q) => q.value != null) ? (
-              <ProviderOrderBookChart quotes={shownBook} selected={selected} onPick={toggleProvider} kind="price" />
+              <ProviderOrderBookChart quotes={shownBook} selected={shownProviders} onPick={toggleProvider} kind="price" />
             ) : (
               <Empty label="No provider quotes yet." />
             )
           ) : volumeRows.length ? (
             <ProviderOrderBookChart
               quotes={volumeRows
-                .filter((r) => r.share >= 0.01 || selected.includes(r.provider))
+                .filter((r) => r.share >= 0.01 || shownProviders.includes(r.provider))
                 .map((r) => ({ provider: r.provider, value: bookMode === "tokens" ? r.tokens : r.spendUsd }))
                 .filter((q) => q.value != null)
                 .sort((a, b) => (b.value ?? 0) - (a.value ?? 0))}
-              selected={selected}
+              selected={shownProviders}
               onPick={toggleProvider}
               kind={bookMode}
             />
@@ -451,13 +498,13 @@ export function ExplorerView({
               {shownBook.map((q, i) => (
                 <tr
                   key={q.provider}
-                  className={selected.includes(q.provider) ? "row-sel" : ""}
+                  className={shownProviders.includes(q.provider) ? "row-sel" : ""}
                   onClick={() => toggleProvider(q.provider)}
                 >
                   <td className="left" style={{ fontFamily: "var(--font-body)", fontWeight: 500 }}>
                     {q.provider}
                     {i === 0 && <Badge kind="free">cheapest</Badge>}
-                    {selected.includes(q.provider) && <Badge kind="ghost">pinned</Badge>}
+                    {shownProviders.includes(q.provider) && <Badge kind="ghost">on chart</Badge>}
                   </td>
                   <td className="val-min" style={{ fontWeight: 600 }}>{q.row.isFree ? "$0" : mtok(q.value)}</td>
                   <td>{q.row.isFree ? "$0" : perMtok(q.row.promptUsd)}</td>

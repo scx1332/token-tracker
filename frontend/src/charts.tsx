@@ -109,60 +109,31 @@ function xdates(
 // ---------------------------------------------------------------------------
 
 /**
- * The cross-provider price envelope for one model: the cheapest-provider line
- * (bold, the "minimum" analysts track) inside the min–max spread band, with an
- * own step line for every provider the user has pinned. Prices are step
- * functions, so the lines use h-v interpolation; a rangeslider lets you scrub
- * the timeline.
+ * A model's price history: the cheapest-provider line (bold, the "minimum"
+ * analysts track) plus an own step line per shown provider — by default the
+ * ones carrying real traffic, with anything else added by clicking. Prices are
+ * step functions, so the lines use h-v interpolation; a rangeslider lets you
+ * scrub the timeline.
  */
 export function PriceEnvelopeChart({
   x,
   min,
-  max,
   cheapest,
   providers,
   metricLabel,
   height = 400,
-  showBand = true,
   rangeslider = true,
 }: {
   x: string[];
   min: (number | null)[];
-  max: (number | null)[];
   cheapest: (string | null)[];
   providers?: { name: string; x: string[]; y: (number | null)[]; color: string }[];
   metricLabel: string;
   height?: number;
-  showBand?: boolean;
   rangeslider?: boolean;
 }) {
   const data = useMemo<Data[]>(() => {
     const traces: Data[] = [];
-    const bandVisible = showBand && max.some((v, i) => v != null && min[i] != null && (v as number) > (min[i] as number) + 1e-12);
-    if (bandVisible) {
-      traces.push({
-        type: "scatter",
-        mode: "lines",
-        name: "spread-lower",
-        x,
-        y: min,
-        line: { width: 0, shape: "hv" },
-        hoverinfo: "skip",
-        showlegend: false,
-      });
-      traces.push({
-        type: "scatter",
-        mode: "lines",
-        name: "Provider spread",
-        x,
-        y: max,
-        line: { width: 0, shape: "hv" },
-        fill: "tonexty",
-        fillcolor: "rgba(43,52,204,0.07)",
-        hovertemplate: "high $%{y:.4~f}/M<extra>dearest</extra>",
-        showlegend: true,
-      });
-    }
     traces.push({
       type: "scatter",
       mode: "lines+markers",
@@ -187,7 +158,7 @@ export function PriceEnvelopeChart({
       });
     }
     return traces;
-  }, [x, min, max, cheapest, providers, showBand]);
+  }, [x, min, cheapest, providers]);
 
   const layout = baseLayout({
     height,
