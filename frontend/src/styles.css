@@ -1263,6 +1263,15 @@ table.tt tbody tr:last-child td {
   flex: none;
 }
 
+/* Matches the reference line drawn over the revenue tape. */
+.forecast-note .fc-swatch.dash {
+  width: 16px;
+  height: 0;
+  border: 0;
+  border-top: 2px dotted var(--ink);
+  background: none;
+}
+
 .forecast-note .fc-head .up {
   color: var(--up);
 }

@@ -1,9 +1,9 @@
 import { encodeModelId } from "../routes";
 import { useEffect, useMemo, useState } from "react";
-import { api, type ProviderStat, type ProvidersMarketResponse } from "../api";
+import { api, type ProviderStat, type ProvidersMarketResponse, type UsageSeriesPoint } from "../api";
 import { Loading, ErrorNote, Panel, SectionHead } from "../components";
 import { ProviderRevenueChart, Sparkline, PROVIDER_COLORS, C } from "../charts";
-import { usd, compact, mtok, displayName } from "../format";
+import { usd, compact, mtok, displayName, shortDate } from "../format";
 
 /** Pricing-side display names for usage-side provider slugs. */
 const PROVIDER_LABEL: Record<string, string> = {
@@ -42,6 +42,14 @@ const MODEL_COLORS = [
 ];
 const OTHER_COLOR = "rgba(139,151,166,0.45)";
 
+/** The tape's head-of-market total against the whole market's, one day. */
+interface Coverage {
+  date: string;
+  spend: { head: number; whole: number; share: number };
+  tokens: { head: number; whole: number; share: number };
+  models: number;
+}
+
 interface Desk {
   slug: string;
   name: string;
@@ -56,16 +64,26 @@ interface Desk {
 export function ProvidersView({ navigate }: { navigate: (to: string) => void }) {
   const [market, setMarket] = useState<ProvidersMarketResponse | null>(null);
   const [stats, setStats] = useState<ProviderStat[] | null>(null);
+  // Market-wide daily totals (the Market view's headline series) — the tape's
+  // yardstick. Free traffic is left in: the top-40 sweep carries free variants
+  // too, so both sides of the comparison count them.
+  const [totals, setTotals] = useState<UsageSeriesPoint[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [mode, setMode] = useState<"spend" | "tokens">("spend");
 
   useEffect(() => {
     let alive = true;
-    Promise.all([api.providersMarket(90), api.providers()])
-      .then(([m, p]) => {
+    Promise.all([
+      api.providersMarket(90),
+      api.providers(),
+      // Overlay only: if the market totals fail the tape must still draw.
+      api.marketSeries(90, true).catch(() => ({ series: [] as UsageSeriesPoint[] })),
+    ])
+      .then(([m, p, t]) => {
         if (!alive) return;
         setMarket(m);
         setStats(p.providers);
+        setTotals(t.series);
       })
       .catch((e) => alive && setError(String(e.message ?? e)));
     return () => {
@@ -162,6 +180,46 @@ export function ProvidersView({ navigate }: { navigate: (to: string) => void }) 
     return out;
   }, [market, dates, desks, mode]);
 
+  // The same days measured the other way: every model with usage, from the
+  // daily rankings rows. Drawn over the stack as the market's own total.
+  const benchmark = useMemo(() => {
+    if (dates.length === 0 || totals.length === 0) return null;
+    const byDate = new Map(totals.map((t) => [t.bucketDate, t]));
+    const y = dates.map((d) => {
+      const row = byDate.get(d);
+      if (!row) return null;
+      return (mode === "spend" ? row.totalSpendUsd : row.totalTokens) ?? null;
+    });
+    if (!y.some((v) => v !== null)) return null;
+    return { name: "All models · market total", x: dates, y };
+  }, [dates, totals, mode]);
+
+  // Latest day both sides cover: how much of the market the tape actually carries.
+  const coverage = useMemo<Coverage | null>(() => {
+    if (!market || dates.length === 0 || totals.length === 0) return null;
+    const byDate = new Map(totals.map((t) => [t.bucketDate, t]));
+    const tape = new Map<string, { spend: number; tokens: number }>();
+    for (const s of market.series) {
+      const t = tape.get(s.bucketDate) ?? { spend: 0, tokens: 0 };
+      t.spend += s.spendUsd ?? 0;
+      t.tokens += s.tokens ?? 0;
+      tape.set(s.bucketDate, t);
+    }
+    for (let i = dates.length - 1; i >= 0; i -= 1) {
+      const date = dates[i]!;
+      const whole = byDate.get(date);
+      const head = tape.get(date);
+      if (!whole || !head || !whole.totalSpendUsd || !whole.totalTokens) continue;
+      return {
+        date,
+        spend: { head: head.spend, whole: whole.totalSpendUsd, share: head.spend / whole.totalSpendUsd },
+        tokens: { head: head.tokens, whole: whole.totalTokens, share: head.tokens / whole.totalTokens },
+        models: whole.modelCount,
+      };
+    }
+    return null;
+  }, [market, dates, totals]);
+
   if (error) return <ErrorNote error={error} />;
   if (!market || !stats) return <Loading label="Loading provider market…" />;
 
@@ -187,6 +245,7 @@ export function ProvidersView({ navigate }: { navigate: (to: string) => void }) 
             <div className="chart-title">The revenue tape</div>
             <div className="chart-note mono">
               {mode === "spend" ? "est. $/day" : "tokens/day"} · stacked · top 10 providers + rest · complete days
+              {benchmark ? " · dotted line = whole market" : ""}
             </div>
           </div>
           <div className="seg seg-sm">
@@ -198,7 +257,12 @@ export function ProvidersView({ navigate }: { navigate: (to: string) => void }) 
             </button>
           </div>
         </div>
-        {traces.length ? <ProviderRevenueChart traces={traces} mode={mode} height={330} /> : <div className="empty">History accumulates daily — check back tomorrow.</div>}
+        {traces.length ? (
+          <ProviderRevenueChart traces={traces} mode={mode} height={330} benchmark={benchmark} />
+        ) : (
+          <div className="empty">History accumulates daily — check back tomorrow.</div>
+        )}
+        {coverage ? <CoverageNote coverage={coverage} mode={mode} /> : null}
       </Panel>
 
       {/* Desks */}
@@ -257,6 +321,40 @@ export function ProvidersView({ navigate }: { navigate: (to: string) => void }) 
       <SectionHead eyebrow="Price book" title={`${stats.length} providers quoting`} />
       <PriceBook stats={stats} navigate={navigate} />
     </>
+  );
+}
+
+/**
+ * How much of the market the tape actually carries — and the warning that the
+ * two numbers are not measured the same way.
+ */
+function CoverageNote({ coverage, mode }: { coverage: Coverage; mode: "spend" | "tokens" }) {
+  const active = mode === "spend" ? coverage.spend : coverage.tokens;
+  const other = mode === "spend" ? coverage.tokens : coverage.spend;
+  const fmtActive = (v: number) => (mode === "spend" ? usd(v) : `${compact(v)} tok`);
+  const fmtOther = (v: number) => (mode === "spend" ? `${compact(v)} tok` : usd(v));
+  const share = (v: number) => `${(v * 100).toFixed(0)}%`;
+
+  return (
+    <div className="forecast-note">
+      <div className="fc-head">
+        <span className="fc-swatch dash" />
+        <span>
+          {shortDate(coverage.date)}: the top-40 tape reads <b>{share(active.share)}</b> of the market —{" "}
+          <b>{fmtActive(active.head)}</b> of <b>{fmtActive(active.whole)}</b> across all {coverage.models} models with
+          usage ({mode === "spend" ? "tokens" : "spend"}: {fmtOther(other.head)} of {fmtOther(other.whole)},{" "}
+          {share(other.share)})
+        </span>
+      </div>
+      <div className="fc-method mono">
+        Two measurements of one market, not one measurement twice. The stack is each provider's own daily tokens — top
+        40 models, up to 8 providers each — priced at that provider's usage-weighted effective rates. The line is every
+        model with usage, priced from the daily rankings rows, which carry the real prompt/completion split where the
+        tape can only blend total tokens at the model's average mix. Read the space between them as head-of-market
+        coverage while the stack sits below; a stack that reaches the line is the two bases disagreeing, not 40 models
+        owning the whole market.
+      </div>
+    </div>
   );
 }
 

@@ -1014,32 +1014,47 @@ export function WeeklyRaceChart({
 /**
  * Provider revenue tape: stacked daily est. revenue (or tokens) per provider.
  * Traces arrive pre-assembled (name, x, y, color), biggest provider first so
- * it sits at the bottom of the stack.
+ * it sits at the bottom of the stack. `benchmark` draws the whole market's
+ * daily total over the stack as a neutral reference line — same units, same
+ * axis — so the head-of-market tape can be read against the full catalog.
  */
 export function ProviderRevenueChart({
   traces,
   mode,
   height = 320,
+  benchmark = null,
 }: {
   traces: { name: string; x: string[]; y: (number | null)[]; color: string }[];
   mode: "spend" | "tokens";
   height?: number;
+  benchmark?: { name: string; x: string[]; y: (number | null)[] } | null;
 }) {
-  const data = useMemo<Data[]>(
-    () =>
-      traces.map((t) => ({
+  const data = useMemo<Data[]>(() => {
+    const out: Data[] = traces.map((t) => ({
+      type: "scatter",
+      mode: "lines",
+      name: t.name,
+      x: t.x,
+      y: t.y,
+      stackgroup: "one",
+      line: { width: 0.6, color: t.color },
+      fillcolor: hexToRgba(t.color, 0.55),
+      hovertemplate: `${mode === "spend" ? "$%{y:.3~s}" : "%{y:.3~s} tok"} · ${escapeHtml(t.name)}<extra></extra>`,
+    }));
+    // No stackgroup: the reference line reads absolute, not stacked on top.
+    if (benchmark) {
+      out.push({
         type: "scatter",
         mode: "lines",
-        name: t.name,
-        x: t.x,
-        y: t.y,
-        stackgroup: "one",
-        line: { width: 0.6, color: t.color },
-        fillcolor: hexToRgba(t.color, 0.55),
-        hovertemplate: `${mode === "spend" ? "$%{y:.3~s}" : "%{y:.3~s} tok"} · ${escapeHtml(t.name)}<extra></extra>`,
-      })),
-    [traces, mode],
-  );
+        name: benchmark.name,
+        x: benchmark.x,
+        y: benchmark.y,
+        line: { width: 2, color: C.ink, dash: "dot" },
+        hovertemplate: `${mode === "spend" ? "$%{y:.3~s}" : "%{y:.3~s} tok"} · ${escapeHtml(benchmark.name)}<extra></extra>`,
+      });
+    }
+    return out;
+  }, [traces, mode, benchmark]);
 
   const layout = baseLayout({
     height,

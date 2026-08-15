@@ -285,6 +285,9 @@ export const api = {
   health: () => get<HealthResponse>("/health"),
   market: (days = 120, includeFree = false) =>
     get<MarketResponse>(`/market?days=${days}${includeFree ? "&includeFree=true" : ""}`),
+  /** Just the market-wide daily totals — the cheap half of /market. */
+  marketSeries: (days = 120, includeFree = false) =>
+    get<{ series: UsageSeriesPoint[] }>(`/market/series?days=${days}${includeFree ? "&includeFree=true" : ""}`),
   models: (params: { search?: string; author?: string; limit?: number } = {}) => {
     const q = new URLSearchParams();
     if (params.search) q.set("search", params.search);
