@@ -35,7 +35,12 @@ docker compose up -d --build                    # full stack (or ./deploy.sh)
 - **Usage rows are keyed `(model_id, provider, bucket_date)`.** The hourly
   rankings pass writes with `onConflict: "update"` (authoritative, has the
   prompt/completion split → accurate spend). The backfill writes with
-  `onConflict: "ignore"` (gap‑filler only — never clobber a rankings row).
+  `onConflict: "refresh-own"` — `DO UPDATE … WHERE source = EXCLUDED.source` —
+  so it fills gaps and may restate rows it wrote itself, and still can never
+  clobber a rankings row. Plain `"ignore"` left it unable to correct its own
+  history: the endpoint double‑count above sat in the table until this mode
+  existed. It also prices at effective rates like the hourly pass, or a refresh
+  would restate history at list price (~6× too high).
 - **Attribution join key is `permaslug` + `variant`.** A catalog model's
   `canonical_slug` **is** its permaslug (verified 1:1). Resolve usage records via
   `resolveUsageModelId` (variant → base fallback; non‑`~` ids beat `~` aliases).

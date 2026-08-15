@@ -51,6 +51,13 @@ export interface PricePointInsert {
   observedAt?: Date;
 }
 
+/**
+ * How a usage write resolves a `(model_id, provider, bucket_date)` collision:
+ * "update" clobbers (the authoritative rankings pass), "ignore" gap-fills only,
+ * "refresh-own" restates rows written by the same `source` and leaves the rest.
+ */
+export type UsageConflict = "update" | "ignore" | "refresh-own";
+
 export interface UsageUpsert {
   modelId: string;
   provider: string; // "" = model-level
@@ -1048,7 +1055,8 @@ export class Storage {
    * `onConflict: "ignore"` makes this a gap-filler that never overwrites rows an
    * authoritative source already wrote (used by the historical backfill).
    */
-  async upsertUsageBatch(points: UsageUpsert[], opts: { onConflict?: "update" | "ignore" } = {}): Promise<number> {
+  /** Returns rows actually written — a skipped gap-fill or a guarded refresh counts 0. */
+  async upsertUsageBatch(points: UsageUpsert[], opts: { onConflict?: UsageConflict } = {}): Promise<number> {
     if (points.length === 0) return 0;
     const sql = usageInsertSql(this.t("usage_snapshots"), opts.onConflict ?? "update");
     const client = await this.pool.connect();
@@ -1056,8 +1064,8 @@ export class Storage {
     try {
       await client.query("BEGIN");
       for (const point of points) {
-        await client.query(sql, usageParams(point));
-        count += 1;
+        const res = await client.query(sql, usageParams(point));
+        count += res.rowCount ?? 0;
       }
       await client.query("COMMIT");
     } catch (error) {
@@ -1654,7 +1662,11 @@ export function priceStateKey(modelId: string, provider: string): string {
   return `${modelId}\u0000${provider}`;
 }
 
-function usageInsertSql(table: string, onConflict: "update" | "ignore"): string {
+function usageInsertSql(table: string, onConflict: UsageConflict): string {
+  // "refresh-own" lets a source correct rows IT wrote and nothing else: the
+  // backfill may restate its own provider-token-chart history (it once summed
+  // duplicate endpoints) but can never overwrite an authoritative rankings row.
+  const guard = onConflict === "refresh-own" ? `\n        WHERE ${table}.source = EXCLUDED.source` : "";
   const conflict =
     onConflict === "ignore"
       ? "ON CONFLICT (model_id, provider, bucket_date) DO NOTHING"
@@ -1666,7 +1678,7 @@ function usageInsertSql(table: string, onConflict: "update" | "ignore"): string 
           estimated_spend_usd = EXCLUDED.estimated_spend_usd,
           reasoning_tokens = COALESCE(EXCLUDED.reasoning_tokens, ${table}.reasoning_tokens),
           source = EXCLUDED.source,
-          captured_at = NOW()`;
+          captured_at = NOW()${guard}`;
   return `INSERT INTO ${table} (
       model_id, provider, bucket_date, tokens, prompt_tokens, completion_tokens,
       requests, estimated_spend_usd, reasoning_tokens, source, captured_at

@@ -3,8 +3,10 @@
 // The hourly `rankings/models?view=day` pass only records the latest complete
 // day. To seed deeper history (so charts aren't empty on day one) we use
 // `provider-token-chart`, which returns ~90 daily points per model+provider,
-// summed across each model's providers. Writes are gap-fills (ON CONFLICT DO
-// NOTHING) so they never clobber the more accurate rankings rows.
+// summed across each model's providers. Writes fill gaps and restate rows this
+// same source wrote before ("refresh-own"), so a corrected computation can
+// reach the history it got wrong; the more accurate rankings rows are never
+// touched. Re-running this is therefore safe and idempotent.
 
 import { parseIngestConfig, HelpRequested, type IngestConfig } from "./config";
 import { OpenRouterClient, modelVariant } from "./openrouter";
@@ -40,6 +42,13 @@ export async function runBackfill(deps: BackfillDeps): Promise<BackfillResult> {
     log("no models in DB yet — run an ingest pass first");
     return { models: 0, rows: 0 };
   }
+
+  // Same pricing basis as the hourly pass: real paid rates (they embed cache
+  // discounts) wherever the daily sweep has them, list prices for the rest.
+  // Without this a refresh would restate history at ~6x its real cost.
+  const effRates = await storage
+    .getLatestEffectiveRates()
+    .catch(() => new Map<string, { inputPerTok: number; outputPerTok: number }>());
 
   const byUsage = [...models].sort((a, b) => (b.latestTokens ?? 0) - (a.latestTokens ?? 0));
   const targetIds = new Set<string>(byUsage.slice(0, MAX_TARGETS).map((m) => m.modelId));
@@ -78,6 +87,11 @@ export async function runBackfill(deps: BackfillDeps): Promise<BackfillResult> {
         }
       }
 
+      // Split-less rows blend at the model's own observed mix, exactly as
+      // `repriceUsageSpend` does, so a refreshed row already carries the value
+      // the next daily sweep would give it.
+      const eff = effRates.get(model.modelId);
+      const promptShare = (await storage.getObservedPromptShare(model.modelId)) ?? 0.9;
       const rows: UsageUpsert[] = [];
       for (const [date, tokens] of byDate) {
         rows.push({
@@ -88,11 +102,18 @@ export async function runBackfill(deps: BackfillDeps): Promise<BackfillResult> {
           promptTokens: null,
           completionTokens: null,
           requests: null,
-          estimatedSpendUsd: estimateSpendUsd({ totalTokens: tokens, promptUsd: model.promptUsd, completionUsd: model.completionUsd }),
+          estimatedSpendUsd: estimateSpendUsd({
+            totalTokens: tokens,
+            promptUsd: eff ? eff.inputPerTok : model.promptUsd,
+            completionUsd: eff ? eff.outputPerTok : model.completionUsd,
+            promptShare,
+          }),
           source: "provider-token-chart",
         });
       }
-      const inserted = await storage.upsertUsageBatch(rows, { onConflict: "ignore" });
+      // Restate our own history (it once double-counted duplicate endpoints);
+      // rankings rows are authoritative and stay untouched.
+      const inserted = await storage.upsertUsageBatch(rows, { onConflict: "refresh-own" });
       processed += 1;
       if (processed % 15 === 0) log(`  ${processed}/${targets.length} models processed`);
       return inserted;
