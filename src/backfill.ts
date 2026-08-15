@@ -90,7 +90,7 @@ export async function runBackfill(deps: BackfillDeps): Promise<BackfillResult> {
       // Split-less rows blend at the model's own observed mix, exactly as
       // `repriceUsageSpend` does, so a refreshed row already carries the value
       // the next daily sweep would give it.
-      const eff = effRates.get(model.modelId);
+      const rate = effRates.get(model.modelId);
       const promptShare = (await storage.getObservedPromptShare(model.modelId)) ?? 0.9;
       const rows: UsageUpsert[] = [];
       for (const [date, tokens] of byDate) {
@@ -104,8 +104,8 @@ export async function runBackfill(deps: BackfillDeps): Promise<BackfillResult> {
           requests: null,
           estimatedSpendUsd: estimateSpendUsd({
             totalTokens: tokens,
-            promptUsd: eff ? eff.inputPerTok : model.promptUsd,
-            completionUsd: eff ? eff.outputPerTok : model.completionUsd,
+            promptUsd: rate ? rate.inputPerTok : model.promptUsd,
+            completionUsd: rate ? rate.outputPerTok : model.completionUsd,
             promptShare,
           }),
           source: "provider-token-chart",
