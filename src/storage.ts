@@ -1089,22 +1089,36 @@ export class Storage {
     return result.rows.map(mapUsage);
   }
 
+  /**
+   * SQL condition excluding free-model usage rows: `:free` variant ids plus
+   * models whose latest catalog price ('' provider row) is marked free. Usage
+   * models with no price row at all count as paid — most are delisted paid
+   * models, and dropping them would silently shrink history.
+   */
+  private notFreeSql(alias: string): string {
+    return `${alias}.model_id NOT LIKE '%:free'
+      AND COALESCE((SELECT p.is_free FROM ${this.t("price_points")} p
+                    WHERE p.model_id = ${alias}.model_id AND p.provider = ''
+                    ORDER BY p.observed_at DESC LIMIT 1), FALSE) = FALSE`;
+  }
+
   /** Market-wide daily totals (tokens + estimated spend) across all models. */
-  async getMarketUsageSeries(filter: { since?: string } = {}): Promise<
+  async getMarketUsageSeries(filter: { since?: string; excludeFree?: boolean } = {}): Promise<
     { bucketDate: string; totalTokens: number | null; totalSpendUsd: number | null; modelCount: number }[]
   > {
     const params: unknown[] = [];
-    let where = "provider = ''";
+    let where = "us.provider = ''";
     if (filter.since) {
       params.push(filter.since);
-      where += ` AND bucket_date >= $${params.length}`;
+      where += ` AND us.bucket_date >= $${params.length}`;
     }
+    if (filter.excludeFree) where += ` AND ${this.notFreeSql("us")}`;
     const result = await this.pool.query(
       `SELECT bucket_date,
               SUM(tokens) AS total_tokens,
               SUM(estimated_spend_usd) AS total_spend,
               COUNT(*) FILTER (WHERE tokens > 0) AS model_count
-       FROM ${this.t("usage_snapshots")}
+       FROM ${this.t("usage_snapshots")} us
        WHERE ${where}
        GROUP BY bucket_date
        ORDER BY bucket_date ASC`,
@@ -1126,18 +1140,19 @@ export class Storage {
    * (the in-progress week would read as a crash), limited to the union of the
    * window's top `topN` models by spend and by tokens.
    */
-  async getWeeklyModelRace(filter: { since: string; topN?: number }): Promise<
+  async getWeeklyModelRace(filter: { since: string; topN?: number; excludeFree?: boolean }): Promise<
     { date: string; spendByModel: Record<string, number>; tokensByModel: Record<string, number> }[]
   > {
     const topN = Math.min(Math.max(1, filter.topN ?? 14), 40);
+    const freeClause = filter.excludeFree ? ` AND ${this.notFreeSql("us")}` : "";
     const result = await this.pool.query(
-      `SELECT date_trunc('week', bucket_date)::date AS week,
-              model_id,
-              SUM(tokens) AS tokens,
-              SUM(estimated_spend_usd) AS spend,
+      `SELECT date_trunc('week', us.bucket_date)::date AS week,
+              us.model_id,
+              SUM(us.tokens) AS tokens,
+              SUM(us.estimated_spend_usd) AS spend,
               COUNT(*) AS days
-       FROM ${this.t("usage_snapshots")}
-       WHERE provider = '' AND bucket_date >= $1
+       FROM ${this.t("usage_snapshots")} us
+       WHERE us.provider = '' AND us.bucket_date >= $1${freeClause}
        GROUP BY 1, 2
        ORDER BY 1 ASC`,
       [filter.since],
@@ -1173,9 +1188,10 @@ export class Storage {
   }
 
   /** Top models by estimated spend on the most recent day, with names + prices. */
-  async getTopModelsByUsage(limit = 20): Promise<
+  async getTopModelsByUsage(limit = 20, opts: { excludeFree?: boolean } = {}): Promise<
     { modelId: string; name: string; author: string; tokens: number | null; spendUsd: number | null; bucketDate: string }[]
   > {
+    const freeClause = opts.excludeFree ? ` AND ${this.notFreeSql("us")}` : "";
     const result = await this.pool.query(
       `WITH latest AS (
          SELECT MAX(bucket_date) AS d FROM ${this.t("usage_snapshots")} WHERE provider = ''
@@ -1184,7 +1200,7 @@ export class Storage {
               us.tokens, us.estimated_spend_usd, us.bucket_date
        FROM ${this.t("usage_snapshots")} us
        LEFT JOIN ${this.t("models")} m ON m.model_id = us.model_id
-       WHERE us.provider = '' AND us.bucket_date = (SELECT d FROM latest)
+       WHERE us.provider = '' AND us.bucket_date = (SELECT d FROM latest)${freeClause}
        ORDER BY us.estimated_spend_usd DESC NULLS LAST, us.tokens DESC NULLS LAST
        LIMIT $1`,
       [Math.min(Math.max(1, limit), 200)],

@@ -283,7 +283,8 @@ async function get<T>(path: string): Promise<T> {
 
 export const api = {
   health: () => get<HealthResponse>("/health"),
-  market: (days = 120) => get<MarketResponse>(`/market?days=${days}`),
+  market: (days = 120, includeFree = false) =>
+    get<MarketResponse>(`/market?days=${days}${includeFree ? "&includeFree=true" : ""}`),
   models: (params: { search?: string; author?: string; limit?: number } = {}) => {
     const q = new URLSearchParams();
     if (params.search) q.set("search", params.search);

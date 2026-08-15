@@ -30,6 +30,11 @@ function sinceFromParams(params: URLSearchParams, defaultDays: number): string {
   return new Date(Date.now() - days * 86_400_000).toISOString();
 }
 
+/** Token stats exclude free-model traffic unless the caller opts back in. */
+function excludeFreeFromParams(params: URLSearchParams): boolean {
+  return params.get("includeFree") !== "true";
+}
+
 /** Race window: ~13 full weeks of our own daily snapshots (coverage is ~90d). */
 function raceSince(): string {
   return new Date(Date.now() - 13 * 7 * 86_400_000).toISOString().slice(0, 10);
@@ -63,7 +68,9 @@ export function createServer(storage: Storage, options: ServerOptions) {
       case "/market":
         return handleMarket(q);
       case "/market/series":
-        return json({ series: await storage.getMarketUsageSeries({ since: sinceFromParams(q, 120) }) });
+        return json({
+          series: await storage.getMarketUsageSeries({ since: sinceFromParams(q, 120), excludeFree: excludeFreeFromParams(q) }),
+        });
       case "/market/snapshots":
         return json({ snapshots: await storage.getMarketSnapshots({ since: sinceFromParams(q, 120) }) });
       case "/models":
@@ -134,18 +141,19 @@ export function createServer(storage: Storage, options: ServerOptions) {
 
   async function handleMarket(q: URLSearchParams): Promise<Response> {
     const since = sinceFromParams(q, 120);
+    const excludeFree = excludeFreeFromParams(q);
     // Include delisted models: the 1-year weekly race references permaslugs that
     // have since left the catalog, and their last known price still prices them.
     const [latest, series, priceIndex, topModels, apps, appsSpend, weekly, allModels, race] = await Promise.all([
       storage.getLatestMarketSnapshot(),
-      storage.getMarketUsageSeries({ since }),
+      storage.getMarketUsageSeries({ since, excludeFree }),
       storage.getDailyPriceIndex({ since }),
-      storage.getTopModelsByUsage(15),
+      storage.getTopModelsByUsage(15, { excludeFree }),
       readKvJson("apps_ranking"),
       readKvJson("apps_spend"),
       readKvJson("weekly_chart"),
       storage.getModelsWithLatest({ limit: 5000 }),
-      storage.getWeeklyModelRace({ since: raceSince() }),
+      storage.getWeeklyModelRace({ since: raceSince(), excludeFree }),
     ]);
     return json({
       latest,

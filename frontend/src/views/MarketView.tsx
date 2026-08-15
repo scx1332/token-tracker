@@ -18,13 +18,15 @@ export function MarketView({ navigate }: { navigate: (to: string) => void }) {
   const [raceMode, setRaceMode] = useState<"spend" | "tokens">("spend");
   const [weekMode, setWeekMode] = useState<"spend" | "tokens" | "both">("both");
   const [indexMode, setIndexMode] = useState<"price" | "compute">("price");
+  // Free-tier traffic is volume without a market: default it out of token stats.
+  const [includeFree, setIncludeFree] = useState(false);
   const [gpuDaily, setGpuDaily] = useState<GpuDailyRow[]>([]);
   // The race starts Jun 15 2026 — earlier history is noise for today's field.
   const RACE_SINCE = "2026-06-15";
 
   useEffect(() => {
     let alive = true;
-    Promise.all([api.market(120), api.health()])
+    Promise.all([api.market(120, includeFree), api.health()])
       .then(([m, h]) => {
         if (!alive) return;
         setMarket(m);
@@ -43,7 +45,7 @@ export function MarketView({ navigate }: { navigate: (to: string) => void }) {
     return () => {
       alive = false;
     };
-  }, []);
+  }, [includeFree]);
 
   const computeComparison = useMemo(
     () => buildComparison(market?.priceIndex ?? [], gpuDaily, "medianUsd"),
@@ -193,7 +195,9 @@ export function MarketView({ navigate }: { navigate: (to: string) => void }) {
           <div className="chart-head">
             <div>
               <div className="chart-title">Estimated daily spend &amp; throughput</div>
-              <div className="chart-note">tokens × effective paid rate · last 120 days</div>
+              <div className="chart-note">
+                tokens × effective paid rate · last 120 days · {includeFree ? "incl. free models" : "paid models only"}
+              </div>
             </div>
             <div className="legend">
               <span>
@@ -202,6 +206,14 @@ export function MarketView({ navigate }: { navigate: (to: string) => void }) {
               <span>
                 <i style={{ background: C.cyan }} /> tokens
               </span>
+              <div className="seg seg-sm">
+                <button className={!includeFree ? "active" : ""} onClick={() => setIncludeFree(false)}>
+                  Paid
+                </button>
+                <button className={includeFree ? "active" : ""} onClick={() => setIncludeFree(true)}>
+                  + Free
+                </button>
+              </div>
             </div>
           </div>
           <SpendTokensChart series={series} height={268} />
