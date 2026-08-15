@@ -131,7 +131,7 @@ export function MarketView({ navigate }: { navigate: (to: string) => void }) {
   // the first ingest sweep lands.
   const spendApps = market.appsSpend?.apps ?? [];
   const appItems: RankItem[] = spendApps.length
-    ? spendApps.slice(0, 10).map((a) => {
+    ? spendApps.slice(0, 15).map((a) => {
         const max = spendApps[0]?.spendUsd ?? 1;
         return {
           name: a.title,
@@ -141,7 +141,7 @@ export function MarketView({ navigate }: { navigate: (to: string) => void }) {
           color: C.gold,
         };
       })
-    : (market.apps.month.length ? market.apps.month : market.apps.week).slice(0, 10).map((a, _i, list) => ({
+    : (market.apps.month.length ? market.apps.month : market.apps.week).slice(0, 15).map((a, _i, list) => ({
         name: a.title,
         value: a.tokens,
         valueLabel: `${compact(a.tokens)} tok`,
