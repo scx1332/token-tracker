@@ -273,11 +273,6 @@ export function ExplorerView({
           <div className="eyebrow">Price explorer</div>
           <h2 className="section-title">Follow a model's price across every provider</h2>
         </div>
-        <p className="view-sub">
-          Track the <b>minimum</b> price for any model over time and compare the companies serving it. The bold line is
-          the cheapest provider; providers carrying more than {Math.round(AUTO_SHARE * 100)}% of the model's traffic get
-          their own line automatically — click any provider to show or hide it.
-        </p>
       </div>
 
       {/* Control bar */}
