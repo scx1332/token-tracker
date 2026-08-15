@@ -158,6 +158,45 @@ proxies `token-tracker.arkiv-global.net` → `127.0.0.1:28471` (frontend) and
 `/api` → `127.0.0.1:28470` (backend); `gitploy.py` re‑runs `deploy.sh` on new
 commits.
 
+### Backups
+
+`scripts/backup-db.sh` takes a **plain SQL** dump of the whole database and
+7z‑compresses it. Cron runs it daily at 03:30 local; it is safe to run by hand
+at any time.
+
+```bash
+./scripts/backup-db.sh                       # now
+BACKUP_DIR=/mnt/other ./scripts/backup-db.sh # somewhere else
+7z t /home/ubuntu/backups/token-tracker/tokens-2026-08-15.sql.7z   # still sound?
+```
+
+Archives land in `/home/ubuntu/backups/token-tracker/` as
+`tokens-YYYY-MM-DD.sql.7z`, ~1.4 MB each (27 MB of SQL, 19×). The narrative goes
+to `backup.log` in the same directory. Retention keeps 30 dailies plus every
+first‑of‑month indefinitely.
+
+Text, not `-Fc`: a SQL dump can be read, grepped and partly salvaged, and
+restoring it never needs a matching `pg_restore`. `pg_dump` runs *inside* the
+container so its version always matches the server. Compression is PPMd rather
+than LZMA2 — on a real dump it was both smaller (1.44 MB vs 1.54 MB) and six
+times faster, which is what PPMd is for on text.
+
+Every run verifies before it keeps anything: the dump must carry pg_dump's
+completion marker (a truncated dump otherwise looks fine until you need it), and
+the finished archive is decompressed and SHA‑compared against the dump it came
+from. A failed run leaves no archive and prunes nothing.
+
+Restore, from this directory:
+
+```bash
+7z x -so /home/ubuntu/backups/token-tracker/tokens-2026-08-15.sql.7z \
+  | docker compose exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1'
+```
+
+The dump carries `DROP ... IF EXISTS` for everything it recreates, so it
+restores over a live database as well as into an empty one — destructive by
+design, so aim it deliberately.
+
 ## Scraping notes
 
 OpenRouter's public and frontend JSON endpoints are not currently Cloudflare‑

@@ -145,6 +145,14 @@ it. The May 2026 stub is the precedent: patched in SQL, then trimmed.
 One-off repair scripts live in `scratch/` (gitignored) with their reasoning in
 comments; they are records, not tools — none of them can apply twice.
 
+Which makes the daily backup part of the data story, not just ops: once a day
+has aged out of the source's window, **our database is the only copy of it
+anywhere**. `scripts/backup-db.sh` (cron, 03:30 local, → `~/backups/token-tracker/`,
+30 dailies + every first-of-month) is what stands between a bad `DELETE` and
+history that cannot be re-fetched at any price. Restore instructions are in the
+README; the archives are plain SQL inside 7z, so a single table can be pulled
+out of one with `grep` if that is all that is wanted.
+
 ---
 
 ## 6. Open items
