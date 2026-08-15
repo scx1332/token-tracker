@@ -34,6 +34,13 @@ export const C = {
   violet: "#6a54c8",
 };
 
+// GPU supply-depth bars ("GPUs on offer"): orange, semi-transparent so the
+// price lines stay readable on top, but saturated enough to actually register —
+// the earlier 0.18-alpha teal disappeared into the panel background.
+const DEPTH_BAR = "rgba(232, 119, 34, 0.45)";
+/** Matching solid orange for depth axis ticks/titles and depth line series. */
+export const DEPTH_AXIS = "#c4650f";
+
 const FONT = 'system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif';
 
 // Distinct hues for compared provider lines (indigo is reserved for the
@@ -542,7 +549,7 @@ export function GpuBandChart({
         x,
         y: points.map((p) => p.gpusAvailable ?? null),
         yaxis: "y2",
-        marker: { color: "rgba(14,124,134,0.18)" },
+        marker: { color: DEPTH_BAR },
         hovertemplate: "%{y} GPUs<extra>depth</extra>",
       });
     }
@@ -607,8 +614,8 @@ export function GpuBandChart({
             rangemode: "tozero",
             showgrid: false,
             zeroline: false,
-            tickfont: { family: FONT, color: "rgba(14,124,134,0.7)", size: 10 },
-            title: { text: "GPUs", font: { family: FONT, size: 10, color: "rgba(14,124,134,0.7)" } },
+            tickfont: { family: FONT, color: DEPTH_AXIS, size: 10 },
+            title: { text: "GPUs", font: { family: FONT, size: 10, color: DEPTH_AXIS } },
           } as never,
         }
       : {}),
@@ -644,7 +651,7 @@ export function IntradayTapeChart({
         x,
         y: rows.map((r) => r.gpusAvailable),
         yaxis: "y2",
-        marker: { color: "rgba(14,124,134,0.18)" },
+        marker: { color: DEPTH_BAR },
         hovertemplate: "%{y} GPUs<extra>depth</extra>",
       },
       {
@@ -690,8 +697,8 @@ export function IntradayTapeChart({
       rangemode: "tozero",
       showgrid: false,
       zeroline: false,
-      tickfont: { family: FONT, color: "rgba(14,124,134,0.7)", size: 10 },
-      title: { text: "GPUs", font: { family: FONT, size: 10, color: "rgba(14,124,134,0.7)" } },
+      tickfont: { family: FONT, color: DEPTH_AXIS, size: 10 },
+      title: { text: "GPUs", font: { family: FONT, size: 10, color: DEPTH_AXIS } },
     } as never,
   });
 

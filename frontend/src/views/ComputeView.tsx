@@ -15,6 +15,7 @@ import {
   HourProfileChart,
   Sparkline,
   C,
+  DEPTH_AXIS,
 } from "../charts";
 import { compact } from "../format";
 import {
@@ -228,7 +229,7 @@ export function ComputeView({ navigate: _navigate }: { navigate: (to: string) =>
               <HourProfileChart
                 series={[
                   { name: `${selectedMeta?.label ?? selected} floor`, color: C.min, profile: profiles.floor },
-                  { name: "GPUs on offer", color: C.teal, dash: "dot", profile: profiles.depth },
+                  { name: "GPUs on offer", color: DEPTH_AXIS, dash: "dot", profile: profiles.depth },
                   { name: "Token price (weighted)", color: C.amber, profile: profiles.token },
                 ]}
                 height={300}
@@ -318,7 +319,7 @@ export function ComputeView({ navigate: _navigate }: { navigate: (to: string) =>
               The main line is the <b>25th-percentile ask</b> — in a 40-offer book, offer #10. The
               single cheapest box is often one lucky host and gets rented away in minutes; a quarter
               into the book is the price you can still get an hour later. The band spans cheapest →
-              median, and the teal bars are GPUs on offer — price moves read against supply.
+              median, and the orange bars are GPUs on offer — price moves read against supply.
             </div>
           </>
         ) : (
