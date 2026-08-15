@@ -38,7 +38,7 @@ export const C = {
 // a solid top edge, never bars — at 15-min sweep density a bar is ~1px wide on
 // a time axis and disappears no matter how saturated it is. The edge line keeps
 // depth legible even where the fill sits behind the price band.
-const DEPTH_FILL = "rgba(232, 119, 34, 0.22)";
+const DEPTH_FILL = "rgba(232, 119, 34, 0.10)";
 /** Matching solid orange for the depth edge, axis ticks/titles and line series. */
 export const DEPTH_AXIS = "#c4650f";
 
@@ -551,7 +551,7 @@ export function GpuBandChart({
         x,
         y: points.map((p) => p.gpusAvailable ?? null),
         yaxis: "y2",
-        line: { color: DEPTH_AXIS, width: 1.4, shape: "hv" },
+        line: { color: "rgba(196, 101, 15, 0.65)", width: 1.1, shape: "hv" },
         fill: "tozeroy",
         fillcolor: DEPTH_FILL,
         hovertemplate: "%{y} GPUs<extra>depth</extra>",
@@ -577,7 +577,7 @@ export function GpuBandChart({
       y: points.map((p) => p.medianUsd),
       line: { color: C.indigo, width: 1.1, dash: "dot" },
       fill: "tonexty",
-      fillcolor: "rgba(43,52,204,0.07)",
+      fillcolor: "rgba(43,52,204,0.14)",
       hovertemplate: "$%{y:.3~f}/GPU-hr<extra>median</extra>",
     });
     traces.push({
@@ -656,7 +656,7 @@ export function IntradayTapeChart({
         x,
         y: rows.map((r) => r.gpusAvailable),
         yaxis: "y2",
-        line: { color: DEPTH_AXIS, width: 1.4, shape: "hv" },
+        line: { color: "rgba(196, 101, 15, 0.65)", width: 1.1, shape: "hv" },
         fill: "tozeroy",
         fillcolor: DEPTH_FILL,
         hovertemplate: "%{y} GPUs<extra>depth</extra>",

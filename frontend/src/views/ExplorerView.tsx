@@ -110,8 +110,8 @@ export function ExplorerView({
   useEffect(() => {
     if (!modelId) return;
     const q = selected.length ? `?provider=${selected.map(encodeURIComponent).join(",")}` : "";
-    const target = `#/explorer/${encodeURIComponent(modelId)}${q}`;
-    if (window.location.hash !== target) window.history.replaceState(null, "", target);
+    const target = `/explorer/${encodeURIComponent(modelId)}${q}`;
+    if (window.location.pathname + window.location.search !== target) window.history.replaceState(null, "", target);
   }, [modelId, selected]);
 
 
@@ -384,10 +384,10 @@ export function ExplorerView({
           {model && (
             <a
               className="ghost-link"
-              href={`#/model/${encodeURIComponent(model.modelId)}`}
+              href={`/model/${encodeURIComponent(model.modelId)}`}
               onClick={(e) => {
                 e.preventDefault();
-                navigate(`#/model/${encodeURIComponent(model.modelId)}`);
+                navigate(`/model/${encodeURIComponent(model.modelId)}`);
               }}
             >
               Model details →

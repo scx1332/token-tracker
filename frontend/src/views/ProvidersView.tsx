@@ -236,7 +236,7 @@ export function ProvidersView({ navigate }: { navigate: (to: string) => void }) 
                     <span
                       key={c.modelId}
                       className={c.modelId === "__rest__" ? "" : "comp-link"}
-                      onClick={() => c.modelId !== "__rest__" && navigate(`#/model/${encodeURIComponent(c.modelId)}`)}
+                      onClick={() => c.modelId !== "__rest__" && navigate(`/model/${encodeURIComponent(c.modelId)}`)}
                     >
                       <i style={{ background: c.color }} /> {c.label} {(c.share * 100).toFixed(0)}%
                     </span>
@@ -301,7 +301,7 @@ function PriceBook({ stats, navigate }: { stats: ProviderStat[]; navigate: (to: 
         </thead>
         <tbody>
           {rows.map((p) => (
-            <tr key={p.provider} onClick={() => navigate(`#/models?q=${encodeURIComponent(p.provider.toLowerCase())}`)}>
+            <tr key={p.provider} onClick={() => navigate(`/models?q=${encodeURIComponent(p.provider.toLowerCase())}`)}>
               <td className="left" style={{ fontFamily: "var(--font-body)", fontWeight: 500 }}>{p.provider}</td>
               <td>
                 <div style={{ display: "flex", alignItems: "center", gap: 10, justifyContent: "flex-end" }}>

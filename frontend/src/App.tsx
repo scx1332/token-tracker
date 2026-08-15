@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type MouseEvent } from "react";
 import { api, type HealthResponse } from "./api";
 import { Stat } from "./components";
 import { compact, relTime } from "./format";
@@ -9,24 +9,40 @@ import { ModelView } from "./views/ModelView";
 import { ProvidersView } from "./views/ProvidersView";
 import { ComputeView } from "./views/ComputeView";
 
-function useHashRoute(): [string, (to: string) => void] {
-  const [hash, setHash] = useState(() => window.location.hash || "#/");
+function currentPath(): string {
+  return window.location.pathname + window.location.search;
+}
+
+function usePathRoute(): [string, (to: string) => void] {
+  const [path, setPath] = useState(() => {
+    // Old-style #/... bookmarks: rewrite to the path form once on load.
+    const hash = window.location.hash;
+    if (hash.startsWith("#/")) {
+      const target = hash.slice(1);
+      window.history.replaceState(null, "", target);
+      return target;
+    }
+    return currentPath();
+  });
   useEffect(() => {
-    const onChange = () => {
-      setHash(window.location.hash || "#/");
+    const onPop = () => {
+      setPath(currentPath());
       window.scrollTo(0, 0);
     };
-    window.addEventListener("hashchange", onChange);
-    return () => window.removeEventListener("hashchange", onChange);
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
   }, []);
   const navigate = (to: string) => {
-    window.location.hash = to;
+    const target = to.startsWith("#") ? to.slice(1) : to;
+    if (target !== currentPath()) window.history.pushState(null, "", target);
+    setPath(target);
+    window.scrollTo(0, 0);
   };
-  return [hash, navigate];
+  return [path, navigate];
 }
 
 export function App() {
-  const [hash, navigate] = useHashRoute();
+  const [path, navigate] = usePathRoute();
   const [health, setHealth] = useState<HealthResponse | null>(null);
 
   useEffect(() => {
@@ -40,21 +56,27 @@ export function App() {
     };
   }, []);
 
-  const route = parseRoute(hash);
+  const route = parseRoute(path);
+
+  const onLink = (to: string) => (e: MouseEvent) => {
+    if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+    e.preventDefault();
+    navigate(to);
+  };
 
   const navItems: { key: string; label: string; to: string }[] = [
-    { key: "market", label: "Market", to: "#/" },
-    { key: "explorer", label: "Price Explorer", to: "#/explorer" },
-    { key: "models", label: "Models", to: "#/models" },
-    { key: "providers", label: "Providers", to: "#/providers" },
-    { key: "compute", label: "Compute", to: "#/compute" },
+    { key: "market", label: "Market", to: "/" },
+    { key: "explorer", label: "Price Explorer", to: "/explorer" },
+    { key: "models", label: "Models", to: "/models" },
+    { key: "providers", label: "Providers", to: "/providers" },
+    { key: "compute", label: "Compute", to: "/compute" },
   ];
 
   return (
     <div className="app">
       <header className="topbar">
         <div className="topbar-inner">
-          <a className="brand" href="#/">
+          <a className="brand" href="/" onClick={onLink("/")}>
             <span className="brand-mark" aria-hidden="true">
               <svg width="18" height="18" viewBox="0 0 32 32">
                 <path d="M4 22 L12 15 L18 19 L28 8" fill="none" stroke="#2b34cc" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" />
@@ -67,7 +89,7 @@ export function App() {
           </a>
           <nav className="nav">
             {navItems.map((n) => (
-              <a key={n.key} href={n.to} className={route.name === n.key ? "active" : ""}>
+              <a key={n.key} href={n.to} onClick={onLink(n.to)} className={route.name === n.key ? "active" : ""}>
                 {n.label}
               </a>
             ))}
@@ -112,8 +134,8 @@ type Route =
   | { name: "compute" }
   | { name: "model"; id: string };
 
-function parseRoute(hash: string): Route {
-  const raw = hash.replace(/^#\/?/, "");
+function parseRoute(fullPath: string): Route {
+  const raw = fullPath.replace(/^\/+/, "");
   const [pathPart, queryPart] = raw.split("?");
   const path = pathPart ?? "";
   const query = new URLSearchParams(queryPart ?? "");

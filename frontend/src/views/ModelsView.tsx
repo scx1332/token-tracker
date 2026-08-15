@@ -7,8 +7,7 @@ import { isFrontier } from "../frontier";
 type SortKey = "tokens" | "spend" | "input" | "output" | "providers" | "name";
 
 function initialQuery(): string {
-  const m = window.location.hash.match(/[?&]q=([^&]+)/);
-  return m ? decodeURIComponent(m[1]!) : "";
+  return new URLSearchParams(window.location.search).get("q") ?? "";
 }
 
 export function ModelsView({ navigate }: { navigate: (to: string) => void }) {
@@ -112,7 +111,7 @@ export function ModelsView({ navigate }: { navigate: (to: string) => void }) {
           </thead>
           <tbody>
             {rows.slice(0, 600).map((m) => (
-              <tr key={m.modelId} onClick={() => navigate(`#/model/${encodeURIComponent(m.modelId)}`)}>
+              <tr key={m.modelId} onClick={() => navigate(`/model/${encodeURIComponent(m.modelId)}`)}>
                 <td className="left">
                   <div className="model-cell">
                     <span className="model-name">

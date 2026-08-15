@@ -118,7 +118,7 @@ export function MarketView({ navigate }: { navigate: (to: string) => void }) {
       value: m.spendUsd,
       valueLabel: `${usd(m.spendUsd)} · ${compact(m.tokens)} tok`,
       frac: (m.spendUsd ?? 0) / (max || 1),
-      href: `#/model/${encodeURIComponent(m.modelId)}`,
+      href: `/model/${encodeURIComponent(m.modelId)}`,
       color: C.gold,
     };
   });

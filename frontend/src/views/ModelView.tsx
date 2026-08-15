@@ -31,7 +31,7 @@ export function ModelView({ modelId, navigate }: { modelId: string; navigate: (t
 
   return (
     <>
-      <a className="back-link" href="#/models" onClick={(e) => { e.preventDefault(); navigate("#/models"); }}>
+      <a className="back-link" href="/models" onClick={(e) => { e.preventDefault(); navigate("/models"); }}>
         ← All models
       </a>
 
@@ -63,10 +63,10 @@ export function ModelView({ modelId, navigate }: { modelId: string; navigate: (t
           </div>
           <a
             className="btn-primary"
-            href={`#/explorer/${encodeURIComponent(m.modelId)}`}
+            href={`/explorer/${encodeURIComponent(m.modelId)}`}
             onClick={(e) => {
               e.preventDefault();
-              navigate(`#/explorer/${encodeURIComponent(m.modelId)}`);
+              navigate(`/explorer/${encodeURIComponent(m.modelId)}`);
             }}
           >
             Price Explorer →
@@ -141,7 +141,7 @@ export function ModelView({ modelId, navigate }: { modelId: string; navigate: (t
               {providerPrices.map((p, i) => (
                 <tr
                   key={p.provider + i}
-                  onClick={() => navigate(`#/explorer/${encodeURIComponent(m.modelId)}?provider=${encodeURIComponent(p.provider)}`)}
+                  onClick={() => navigate(`/explorer/${encodeURIComponent(m.modelId)}?provider=${encodeURIComponent(p.provider)}`)}
                 >
                   <td className="left" style={{ fontFamily: "var(--font-body)", fontWeight: 500 }}>
                     {p.provider}
