@@ -319,7 +319,7 @@ export function ComputeView({ navigate: _navigate }: { navigate: (to: string) =>
               The main line is the <b>25th-percentile ask</b> — in a 40-offer book, offer #10. The
               single cheapest box is often one lucky host and gets rented away in minutes; a quarter
               into the book is the price you can still get an hour later. The band spans cheapest →
-              median, and the orange bars are GPUs on offer — price moves read against supply.
+              median, and the orange area is GPUs on offer — price moves read against supply.
             </div>
           </>
         ) : (

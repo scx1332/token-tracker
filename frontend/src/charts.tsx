@@ -34,11 +34,12 @@ export const C = {
   violet: "#6a54c8",
 };
 
-// GPU supply-depth bars ("GPUs on offer"): orange, semi-transparent so the
-// price lines stay readable on top, but saturated enough to actually register —
-// the earlier 0.18-alpha teal disappeared into the panel background.
-const DEPTH_BAR = "rgba(232, 119, 34, 0.45)";
-/** Matching solid orange for depth axis ticks/titles and depth line series. */
+// GPU supply depth ("GPUs on offer"): a semi-transparent orange step AREA with
+// a solid top edge, never bars — at 15-min sweep density a bar is ~1px wide on
+// a time axis and disappears no matter how saturated it is. The edge line keeps
+// depth legible even where the fill sits behind the price band.
+const DEPTH_FILL = "rgba(232, 119, 34, 0.22)";
+/** Matching solid orange for the depth edge, axis ticks/titles and line series. */
 export const DEPTH_AXIS = "#c4650f";
 
 const FONT = 'system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif';
@@ -544,12 +545,15 @@ export function GpuBandChart({
 
     if (hasDepth) {
       traces.push({
-        type: "bar",
+        type: "scatter",
+        mode: "lines",
         name: "GPUs on offer",
         x,
         y: points.map((p) => p.gpusAvailable ?? null),
         yaxis: "y2",
-        marker: { color: DEPTH_BAR },
+        line: { color: DEPTH_AXIS, width: 1.4, shape: "hv" },
+        fill: "tozeroy",
+        fillcolor: DEPTH_FILL,
         hovertemplate: "%{y} GPUs<extra>depth</extra>",
       });
     }
@@ -646,12 +650,15 @@ export function IntradayTapeChart({
     const x = rows.map((r) => r.capturedAt);
     return [
       {
-        type: "bar",
+        type: "scatter",
+        mode: "lines",
         name: "GPUs on offer",
         x,
         y: rows.map((r) => r.gpusAvailable),
         yaxis: "y2",
-        marker: { color: DEPTH_BAR },
+        line: { color: DEPTH_AXIS, width: 1.4, shape: "hv" },
+        fill: "tozeroy",
+        fillcolor: DEPTH_FILL,
         hovertemplate: "%{y} GPUs<extra>depth</extra>",
       },
       {
