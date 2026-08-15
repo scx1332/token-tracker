@@ -21,9 +21,9 @@ import { numeric } from "./vastai";
 
 export interface GpuPriceSnapshot {
   gpuName: string;
-  /** Rentable on-demand offers inside the practical-price fence. */
+  /** Rentable machines inside the practical-price fence (one per machine_id). */
   offers: number;
-  /** Sum of GPUs across those offers — market depth, not machine count. */
+  /** Sum of GPUs across those machines — market depth. */
   gpusAvailable: number;
   /** Priced listings excluded as junk: deverified hosts + fence outliers. */
   excludedOffers: number;
@@ -70,6 +70,45 @@ export function isVerified(offer: VastOffer): boolean {
 
 /** How far from the sweep median a listing may sit and still count as market. */
 export const FENCE_FACTOR = 3;
+
+/**
+ * Collapse the chunk-offer book to one offer per physical machine.
+ *
+ * vast.ai's search lists every rentable *allocation* of a machine as its own
+ * offer: an idle 8×5090 box shows up four times, as 1×, 2×, 4× and 8× chunks of
+ * the same silicon. Summing `num_gpus` over that book double-counts massively
+ * (a live RTX 5090 sweep: 372 offers / 1099 "GPUs" collapsing to 273 machines /
+ * 897 real GPUs), and the near-identical per-GPU prices of a machine's chunks
+ * overweight split-friendly hosts in every percentile.
+ *
+ * The representative offer is the machine's largest chunk: it is the whole
+ * rentable inventory of that machine, and its per-GPU price is the marginal
+ * price of that inventory (chunk prices per GPU differ only by the fixed
+ * machine components being spread thinner). Ties break toward the cheaper
+ * machine price. Offers without a machine_id can't be grouped and pass through
+ * as themselves.
+ */
+export function collapseMachines(offers: VastOffer[]): VastOffer[] {
+  const byMachine = new Map<string, VastOffer>();
+  for (const offer of offers) {
+    const machine = numeric(offer.machine_id);
+    const key = machine === null ? `offer:${offer.id}` : `machine:${machine}`;
+    const seen = byMachine.get(key);
+    if (!seen) {
+      byMachine.set(key, offer);
+      continue;
+    }
+    const seenGpus = numeric(seen.num_gpus) ?? 0;
+    const gpus = numeric(offer.num_gpus) ?? 0;
+    if (
+      gpus > seenGpus ||
+      (gpus === seenGpus && (numeric(offer.dph_total) ?? Infinity) < (numeric(seen.dph_total) ?? Infinity))
+    ) {
+      byMachine.set(key, offer);
+    }
+  }
+  return [...byMachine.values()];
+}
 
 /**
  * Split an offer book into the practical rentable market and the junk around it.
@@ -134,11 +173,13 @@ export function percentile(sorted: number[], q: number): number | null {
 
 /**
  * Collapse one GPU's offer book into a single price-band snapshot.
- * Every statistic — including bids, depth and the verified subset — is computed
- * over the fenced set only: a junk listing contributes nothing, not even depth.
+ * The chunk book is first collapsed to one offer per physical machine (see
+ * `collapseMachines`), then fenced; every statistic — including bids, depth and
+ * the verified subset — is computed over the fenced machine-level set only:
+ * a junk listing contributes nothing, not even depth.
  */
 export function summarizeOffers(gpuName: string, offers: VastOffer[]): GpuPriceSnapshot {
-  const { kept, excluded } = fenceOffers(offers);
+  const { kept, excluded } = fenceOffers(collapseMachines(offers));
 
   const prices = kept.map((row) => row.price).sort((a, b) => a - b);
   const gpusAvailable = kept.reduce((sum, row) => sum + (numeric(row.offer.num_gpus) ?? 0), 0);

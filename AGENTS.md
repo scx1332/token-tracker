@@ -57,6 +57,12 @@ docker compose up -d --build                    # full stack (or ./deploy.sh)
   4090 needs four rounds. Do not "simplify" this back to limit/offset.
 - **GPU prices are stored per GPU-hour, never per machine.** vast.ai quotes
   `dph_total`/`min_bid` for a whole box, so everything divides by `num_gpus`.
+- **The vast.ai offer book is chunk-level; stats are machine-level.** One idle
+  8×5090 machine lists as 1×/2×/4×/8× offers of the *same* silicon, so summing
+  `num_gpus` over raw offers double-counts depth (~20% for RTX 5090) and the
+  duplicated near-identical prices skew every percentile. `collapseMachines`
+  (src/gpu.ts) keeps one offer per `machine_id` — the largest chunk, i.e. the
+  machine's full rentable inventory — before fencing. Do not sum over raw offers.
 - **GPU stats describe the practical rentable market, post-fence.**
   `fenceOffers` (src/gpu.ts) drops deverified hosts and listings priced beyond
   `FENCE_FACTOR`(=3)× either side of the sweep median — zombie asks like a $53

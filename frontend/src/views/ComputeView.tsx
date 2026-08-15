@@ -22,6 +22,7 @@ import {
   lastWindow,
   hourOfDayProfile,
   buildComparison,
+  buildHourlyComparison,
   totalChangePct,
 } from "../gpu";
 
@@ -106,9 +107,21 @@ export function ComputeView({ navigate: _navigate }: { navigate: (to: string) =>
     // dailySelected is derived per render; selected covers it in the dep list.
   }, [bandHourly, hourly, dailyAll, selected]);
 
-  const comparison = useMemo(
+  // Same maturity switch as the rental chart: with under a week of shared
+  // daily history the comparison is two points pretending to be a trend, so
+  // build it from hourly token snapshots × 15-min GPU sweeps until dailies
+  // can carry it.
+  const dailyComparison = useMemo(
     () => buildComparison(priceIndex ?? [], dailySelected, metric),
     [priceIndex, dailyByGpu, selected, metric],
+  );
+  const comparisonHourly = dailyComparison.dates.length < DAILY_MIN_DAYS;
+  const comparison = useMemo(
+    () =>
+      comparisonHourly
+        ? buildHourlyComparison(snapshots, hourly ?? [], metric)
+        : dailyComparison,
+    [comparisonHourly, dailyComparison, snapshots, hourly, metric],
   );
 
   const tape = useMemo(() => lastWindow(hourly ?? [], 72, Date.now()), [hourly]);
@@ -242,7 +255,9 @@ export function ComputeView({ navigate: _navigate }: { navigate: (to: string) =>
           <div>
             <div className="chart-title">Inference price vs. raw compute</div>
             <div className="chart-note mono">
-              daily close · both rebased to 100 at window start · {comparison.dates.length} shared days
+              {comparisonHourly
+                ? `hourly · both rebased to 100 at window start · ${comparison.dates.length} shared hours · daily takes over after ${DAILY_MIN_DAYS} days`
+                : `daily close · both rebased to 100 at window start · ${comparison.dates.length} shared days`}
             </div>
           </div>
           <div className="seg seg-sm">
@@ -275,8 +290,8 @@ export function ComputeView({ navigate: _navigate }: { navigate: (to: string) =>
           </>
         ) : (
           <div className="empty">
-            Overlap accumulates as GPU history builds up alongside the token index — check back
-            tomorrow.
+            Overlap accumulates as GPU sweeps build up alongside hourly token snapshots — a
+            readable window forms within a few hours.
           </div>
         )}
       </Panel>

@@ -5,6 +5,7 @@ import {
   isVerified,
   percentile,
   fenceOffers,
+  collapseMachines,
   summarizeOffers,
   usdPerMtokFloor,
   FENCE_FACTOR,
@@ -154,6 +155,50 @@ describe("fenceOffers", () => {
     const { kept, excluded } = fenceOffers([offer({ id: 1, dph_total: 5, verification: "deverified" })]);
     expect(kept).toHaveLength(0);
     expect(excluded).toBe(1);
+  });
+});
+
+describe("collapseMachines", () => {
+  test("keeps only the largest chunk of a machine's 1×/2×/4×/8× ladder", () => {
+    const chunks = [
+      offer({ id: 1, machine_id: 50, num_gpus: 1, dph_total: 0.38 }),
+      offer({ id: 2, machine_id: 50, num_gpus: 2, dph_total: 0.76 }),
+      offer({ id: 3, machine_id: 50, num_gpus: 4, dph_total: 1.53 }),
+      offer({ id: 4, machine_id: 50, num_gpus: 8, dph_total: 3.05 }),
+    ];
+    const collapsed = collapseMachines(chunks);
+    expect(collapsed).toHaveLength(1);
+    expect(collapsed[0]!.id).toBe(4);
+  });
+
+  test("equal-size chunks resolve to the cheaper machine price", () => {
+    const collapsed = collapseMachines([
+      offer({ id: 1, machine_id: 50, num_gpus: 2, dph_total: 1.0 }),
+      offer({ id: 2, machine_id: 50, num_gpus: 2, dph_total: 0.9 }),
+    ]);
+    expect(collapsed).toHaveLength(1);
+    expect(collapsed[0]!.id).toBe(2);
+  });
+
+  test("offers without a machine_id pass through ungrouped", () => {
+    const collapsed = collapseMachines([
+      offer({ id: 1, num_gpus: 1 }),
+      offer({ id: 2, num_gpus: 1 }),
+      offer({ id: 3, machine_id: 7, num_gpus: 4 }),
+    ]);
+    expect(collapsed).toHaveLength(3);
+  });
+
+  test("summarize counts each machine's GPUs once, not per chunk", () => {
+    const book = [
+      offer({ id: 1, machine_id: 50, num_gpus: 1, dph_total: 0.4 }),
+      offer({ id: 2, machine_id: 50, num_gpus: 8, dph_total: 3.04 }), // $0.38/gpu
+      offer({ id: 3, machine_id: 51, num_gpus: 4, dph_total: 1.6 }), // $0.40/gpu
+    ];
+    const s = summarizeOffers("RTX 5090", book);
+    expect(s.offers).toBe(2);
+    expect(s.gpusAvailable).toBe(12); // not 13
+    expect(s.minUsd).toBeCloseTo(0.38, 9);
   });
 });
 

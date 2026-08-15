@@ -5,6 +5,7 @@ import {
   hourOfDayProfile,
   rebase,
   buildComparison,
+  buildHourlyComparison,
   totalChangePct,
 } from "./gpu";
 import type { GpuDailyRow, PriceIndexPoint } from "./api";
@@ -195,6 +196,53 @@ describe("buildComparison", () => {
     const c = buildComparison(priceIndex, [daily({ date: "2026-09-01" })]);
     expect(c.dates).toEqual([]);
     expect(c.tokenIndex).toEqual([]);
+  });
+});
+
+describe("buildHourlyComparison", () => {
+  const snap = (at: string, v: number | null) => ({
+    capturedAt: at,
+    usageWeightedPromptUsdPerMtok: v,
+  });
+  const sweep = (at: string, med: number, min = med / 2) => ({
+    capturedAt: at,
+    minUsd: min,
+    medianUsd: med,
+  });
+
+  test("aligns on shared UTC hours, medianing the sweeps within each hour", () => {
+    const c = buildHourlyComparison(
+      [snap("2026-08-15T09:57:00Z", 0.8), snap("2026-08-15T10:58:00Z", 0.4)],
+      [
+        sweep("2026-08-15T09:05:00Z", 5),
+        sweep("2026-08-15T09:20:00Z", 7),
+        sweep("2026-08-15T09:35:00Z", 6),
+        sweep("2026-08-15T10:05:00Z", 9),
+        sweep("2026-08-15T11:05:00Z", 9), // no token snapshot this hour → dropped
+      ],
+    );
+    expect(c.dates).toEqual(["2026-08-15T09:00", "2026-08-15T10:00"]);
+    expect(c.gpuRaw).toEqual([6, 9]);
+    expect(c.tokenRaw).toEqual([0.8, 0.4]);
+    expect(c.tokenIndex).toEqual([100, 50]);
+    expect(c.gpuIndex[1]).toBeCloseTo(150, 9);
+  });
+
+  test("honours the chosen GPU metric", () => {
+    const c = buildHourlyComparison(
+      [snap("2026-08-15T09:57:00Z", 0.8)],
+      [sweep("2026-08-15T09:05:00Z", 5, 2)],
+      "minUsd",
+    );
+    expect(c.gpuRaw).toEqual([2]);
+  });
+
+  test("null values and unparsable stamps contribute nothing", () => {
+    const c = buildHourlyComparison(
+      [snap("2026-08-15T09:57:00Z", null), snap("not a date", 1)],
+      [sweep("2026-08-15T09:05:00Z", 5)],
+    );
+    expect(c.dates).toEqual([]);
   });
 });
 

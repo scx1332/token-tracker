@@ -166,6 +166,64 @@ export function buildComparison(
   };
 }
 
+/**
+ * Hourly version of `buildComparison`, for young GPU histories.
+ *
+ * With only a few days of vast.ai data, the daily comparison is two or three
+ * points — a slope chart with no slope to read. But both sides exist at finer
+ * grain: token snapshots land hourly and GPU sweeps every 15 minutes. Bucket
+ * each to the UTC hour (median within the hour — a sweep median over 4 samples,
+ * usually a single token snapshot) and align on hours where both exist. Same
+ * contract as the daily build: dates are ISO hour stamps, both series rebased
+ * to 100 at the shared start.
+ */
+export function buildHourlyComparison(
+  snapshots: { capturedAt: string; usageWeightedPromptUsdPerMtok: number | null }[],
+  sweeps: { capturedAt: string; minUsd: number | null; medianUsd: number | null }[],
+  gpuMetric: "minUsd" | "medianUsd" = "medianUsd",
+): ComparisonSeries {
+  const hourKey = (at: string): string | null => {
+    const t = Date.parse(at);
+    if (!Number.isFinite(t)) return null;
+    return new Date(Math.floor(t / 3_600_000) * 3_600_000).toISOString().slice(0, 16);
+  };
+
+  const bucket = (points: { at: string; value: number | null }[]): Map<string, number> => {
+    const byHour = new Map<string, number[]>();
+    for (const p of points) {
+      if (p.value === null || !Number.isFinite(p.value)) continue;
+      const key = hourKey(p.at);
+      if (key === null) continue;
+      const list = byHour.get(key);
+      if (list) list.push(p.value);
+      else byHour.set(key, [p.value]);
+    }
+    const out = new Map<string, number>();
+    for (const [key, values] of byHour) {
+      const m = median(values);
+      if (m !== null) out.set(key, m);
+    }
+    return out;
+  };
+
+  const tokenByHour = bucket(
+    snapshots.map((s) => ({ at: s.capturedAt, value: s.usageWeightedPromptUsdPerMtok })),
+  );
+  const gpuByHour = bucket(sweeps.map((s) => ({ at: s.capturedAt, value: s[gpuMetric] })));
+
+  const dates = [...tokenByHour.keys()].filter((h) => gpuByHour.has(h)).sort();
+  const tokenRaw = dates.map((h) => tokenByHour.get(h) ?? null);
+  const gpuRaw = dates.map((h) => gpuByHour.get(h) ?? null);
+
+  return {
+    dates,
+    tokenIndex: rebase(tokenRaw),
+    gpuIndex: rebase(gpuRaw),
+    tokenRaw,
+    gpuRaw,
+  };
+}
+
 /** Percent change between the first and last usable values, or null. */
 export function totalChangePct(values: (number | null)[]): number | null {
   const usable = values.filter((v): v is number => v !== null && Number.isFinite(v));

@@ -21,6 +21,8 @@ import { fetchJson, type FetchOptions } from "./scraper";
 /** One machine offer from the bundles search. Only fields we consume are typed. */
 export interface VastOffer {
   id: number;
+  /** Physical host machine. One machine spawns several chunk offers (1×/2×/4×/8×). */
+  machine_id?: number | null;
   gpu_name?: string | null;
   num_gpus?: number | null;
   /** Total on-demand price for the whole machine, USD/hour. */
