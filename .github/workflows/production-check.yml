@@ -1,0 +1,76 @@
+# A scraper that stops does not crash. The container stays up, the pass still
+# reports `ok`, every page still renders — and one chart quietly stops moving.
+# This job is what notices: hourly, it asks the live deployment to judge itself
+# (`/api/status`) and turns every check into a test, so the failure email names
+# the source that stopped rather than just "production".
+#
+# GitHub emails the workflow's author when a scheduled run fails; that email is
+# the alarm. Two things worth knowing about scheduled runs: they are skipped
+# under load and can be minutes late (harmless — every threshold here is hours
+# wide), and GitHub disables them after 60 days without a commit to the repo.
+name: Production — is it still scraping?
+
+on:
+  schedule:
+    # Hourly. The pipeline's fastest source sweeps every 15 minutes and its
+    # tightest failure threshold is 90 minutes, so an hourly check catches
+    # everything within a couple of hours. Widen it if the mail gets tiresome.
+    - cron: "25 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-check
+  cancel-in-progress: true
+
+env:
+  # Override with a repository variable to point this at another deployment.
+  PROD_BASE_URL: ${{ vars.PROD_BASE_URL || 'https://token-tracker.arkiv-global.net' }}
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - run: bun install --frozen-lockfile
+
+      # The alarm before the thing it is alarming about. `monitor.test.ts` runs
+      # the checks against fixtures of every failure mode they exist to catch;
+      # if that is broken, a green verdict below means nothing at all.
+      - name: The checks themselves still work
+        run: bun test src/monitor.test.ts
+
+      - name: The deployment still works
+        run: bun test src/production.test.ts
+
+      # Always: the table is most useful precisely when the step above failed.
+      - name: What the deployment said
+        if: always()
+        run: |
+          set -uo pipefail
+          code=$(curl -sS -m 30 -o status.json -w '%{http_code}' "$PROD_BASE_URL/api/status" || echo 000)
+          if ! jq -e . status.json >/dev/null 2>&1; then
+            echo "### $PROD_BASE_URL/api/status answered $code with no JSON body" >>"$GITHUB_STEP_SUMMARY"
+            head -c 2000 status.json >>"$GITHUB_STEP_SUMMARY" 2>/dev/null || true
+            exit 0
+          fi
+          {
+            echo "### $(jq -r '"\(.status | ascii_upcase) — \(.checkedAt)"' status.json)"
+            echo
+            echo "\`$PROD_BASE_URL\` · HTTP $code · build \`$(jq -r '.build.commit[0:8] // "?"' status.json)\`"
+            echo
+            echo '| | check | detail |'
+            echo '|---|---|---|'
+            jq -r '.checks[] |
+              "| \(if .status == "ok" then "✅" elif .status == "warn" then "⚠️"
+                   elif .status == "skip" then "➖" else "❌" end) | `\(.name)` | \(.detail) |"' status.json
+          } >>"$GITHUB_STEP_SUMMARY"

@@ -92,4 +92,33 @@ describe("HTTP server (integration)", () => {
       await cleanup();
     }
   });
+
+  it("serves /status, and says 503 when the pipeline is not running", async () => {
+    const { storage, cleanup } = await createIsolatedStorage();
+    const server = createServer(storage, { port: 0, hostname: "127.0.0.1" });
+    const base = `http://127.0.0.1:${server.port}`;
+    try {
+      await seed(storage);
+
+      // This database has a catalog and one usage row but has never run an
+      // ingest pass. The checks are meant to say so, loudly.
+      const res = await fetch(`${base}/status`);
+      expect(res.status).toBe(503);
+      const body = await res.json();
+      expect(body.ok).toBe(false);
+      expect(body.status).toBe("fail");
+      expect(body.checks.find((c: { name: string }) => c.name === "ingest.pass").status).toBe("fail");
+      expect(body.checks.find((c: { name: string }) => c.name === "catalog.scrape").status).toBe("ok");
+      // No backup directory is mounted under test, so those skip rather than fail.
+      expect(body.checks.find((c: { name: string }) => c.name === "backup.age").status).toBe("skip");
+      expect(body.facts.catalog.active).toBe(1);
+
+      // ...while /health stays 200 through all of it: Docker restarts the
+      // container on an unhealthy check, and a restart fixes none of this.
+      expect((await fetch(`${base}/health`)).status).toBe(200);
+    } finally {
+      server.stop(true);
+      await cleanup();
+    }
+  });
 });

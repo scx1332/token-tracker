@@ -6,7 +6,8 @@ import { buildRateByPermaslug } from "./market";
 import { fetchJson } from "./scraper";
 import { parseEndpointStats } from "./usage";
 import { bearerToken, pickLatestBackup, secretEquals } from "./backup";
-import { readdir } from "node:fs/promises";
+import { evaluateChecks, overallStatus, type BackupFact, type MonitorFacts } from "./monitor";
+import { readdir, stat } from "node:fs/promises";
 import { createHash } from "node:crypto";
 
 export interface ServerOptions {
@@ -74,6 +75,8 @@ export function createServer(storage: Storage, options: ServerOptions) {
       case "/":
       case "/health":
         return handleHealth();
+      case "/status":
+        return handleStatus();
       case "/market":
         return handleMarket(q);
       case "/market/series":
@@ -161,6 +164,46 @@ export function createServer(storage: Storage, options: ServerOptions) {
         "Cache-Control": "no-store",
       },
     });
+  }
+
+  /**
+   * The production checks, evaluated against the live database.
+   *
+   * `/health` describes the deployment; this one judges it. Every scraper's
+   * newest write, the size of the last closed day against the week before it,
+   * holes in the usage series, the age of the backup — `src/monitor.ts` owns
+   * what each of those means, this only collects the facts.
+   *
+   * A failing verdict answers 503, so an uptime pinger that understands nothing
+   * about the payload is still a working alarm. `/health` deliberately stays
+   * 200 through all of it: Docker restarts the container on an unhealthy
+   * check, and restarting the API fixes none of these.
+   */
+  async function handleStatus(): Promise<Response> {
+    const [dbFacts, backup] = await Promise.all([storage.getMonitorFacts(), readBackupFact()]);
+    const facts: MonitorFacts = { ...dbFacts, backup };
+    const checks = evaluateChecks(facts);
+    const status = overallStatus(checks);
+    return json(
+      { ok: status !== "fail", status, checkedAt: facts.nowUtc, build, checks, facts },
+      status === "fail" ? 503 : 200,
+    );
+  }
+
+  /**
+   * The newest archive, by mtime rather than by the date in its name: the
+   * question is when the cron last wrote one, not what it decided to call it.
+   * A directory that is not mounted at all reads as null, so a dev instance
+   * skips the backup checks instead of failing them.
+   */
+  async function readBackupFact(): Promise<BackupFact | null> {
+    const names = await readdir(BACKUP_DIR).catch(() => null);
+    if (!names) return null;
+    const name = pickLatestBackup(names);
+    if (!name) return { name: null, ageHours: null, bytes: null };
+    const info = await stat(`${BACKUP_DIR}/${name}`).catch(() => null);
+    if (!info) return { name: null, ageHours: null, bytes: null };
+    return { name, ageHours: (Date.now() - info.mtimeMs) / 3_600_000, bytes: info.size };
   }
 
   async function handleHealth(): Promise<Response> {

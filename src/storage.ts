@@ -1,5 +1,6 @@
 import pg from "pg";
 import type { NormalizedPricing } from "./types";
+import type { MonitorDbFacts } from "./monitor";
 
 const { Pool, types } = pg;
 
@@ -12,6 +13,12 @@ types.setTypeParser(20, (value: string) => value);
 types.setTypeParser(1082, (value: string) => value);
 
 export const MAX_ROWS = 50_000;
+
+/** Days of the model-level daily series `getMonitorFacts` returns for sizing checks. */
+const MONITOR_DAILY_DAYS = 14;
+
+/** How many ingest runs the monitor looks back over for a failure pattern. */
+const MONITOR_RUNS = 5;
 
 export interface StorageOptions {
   schema?: string;
@@ -1645,6 +1652,108 @@ export class Storage {
     };
   }
 
+  /**
+   * Everything `src/monitor.ts` needs to decide whether the pipeline is still
+   * working, in three round trips.
+   *
+   * Deliberately separate from `getCoverage()`: that one exists to *describe*
+   * the data for the health endpoint, this one exists to *accuse* it. Every
+   * field is something a production check can fail on, which is why the
+   * freshness of each source is read individually rather than rolled up — the
+   * whole point is to tell "vast.ai stopped" apart from "everything stopped".
+   */
+  async getMonitorFacts(): Promise<MonitorDbFacts> {
+    const usage = this.t("usage_snapshots");
+    const gpu = this.t("gpu_price_snapshots");
+    const [scalars, missing, daily, runs] = await Promise.all([
+      this.pool.query(
+        `SELECT
+           ${isoUtc("NOW()")} AS now_utc,
+           (SELECT ${isoUtc("MAX(last_seen_at)")} FROM ${this.t("models")}) AS catalog_at,
+           (SELECT ${isoUtc("MAX(observed_at)")} FROM ${this.t("price_points")}) AS price_change_at,
+           (SELECT ${isoUtc("MAX(captured_at)")} FROM ${usage} WHERE provider = '') AS usage_model_at,
+           (SELECT ${isoUtc("MAX(captured_at)")} FROM ${usage} WHERE provider <> '') AS usage_provider_at,
+           (SELECT ${isoUtc("MAX(captured_at)")} FROM ${this.t("effective_price_snapshots")}) AS effective_price_at,
+           (SELECT ${isoUtc("MAX(captured_at)")} FROM ${this.t("provider_volume_snapshots")}) AS provider_volume_at,
+           (SELECT ${isoUtc("MAX(captured_at)")} FROM ${this.t("market_snapshots")}) AS market_snapshot_at,
+           (SELECT ${isoUtc("MAX(captured_at)")} FROM ${gpu}) AS gpu_sweep_at,
+           (SELECT COUNT(*) FROM ${this.t("models")}) AS models_total,
+           (SELECT COUNT(*) FROM ${this.t("models")} WHERE is_active) AS models_active,
+           (SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY active_models)
+              FROM ${this.t("market_snapshots")} WHERE captured_at > NOW() - INTERVAL '7 days') AS models_active_median,
+           (SELECT MIN(bucket_date)::text FROM ${usage} WHERE provider = '') AS usage_first,
+           (SELECT MAX(bucket_date)::text FROM ${usage} WHERE provider = '') AS usage_last,
+           (SELECT COUNT(*) FROM ${gpu} WHERE captured_at = (SELECT MAX(captured_at) FROM ${gpu})) AS gpu_rows,
+           (SELECT COUNT(*) FROM ${gpu} WHERE captured_at = (SELECT MAX(captured_at) FROM ${gpu}) AND offers > 0) AS gpu_with_offers`,
+      ),
+      // Days between the first and the last with no model-level row at all.
+      // The series bounds are cast to plain `timestamp` first: generate_series
+      // over `date` yields timestamptz, and rendering that back to a day would
+      // depend on the server's timezone.
+      this.pool.query<{ date: string }>(
+        `SELECT to_char(d::date, 'YYYY-MM-DD') AS date
+           FROM generate_series(
+                  (SELECT MIN(bucket_date)::timestamp FROM ${usage} WHERE provider = ''),
+                  (SELECT MAX(bucket_date)::timestamp FROM ${usage} WHERE provider = ''),
+                  INTERVAL '1 day') AS d
+          WHERE NOT EXISTS (
+                  SELECT 1 FROM ${usage} u WHERE u.provider = '' AND u.bucket_date = d::date)
+          ORDER BY d`,
+      ),
+      this.pool.query(
+        `SELECT bucket_date::text AS date, SUM(tokens) AS tokens, SUM(estimated_spend_usd) AS spend
+           FROM ${usage}
+          WHERE provider = ''
+            AND bucket_date >= (SELECT MAX(bucket_date) FROM ${usage} WHERE provider = '') - $1::int
+          GROUP BY bucket_date
+          ORDER BY bucket_date ASC`,
+        [MONITOR_DAILY_DAYS],
+      ),
+      this.getIngestRuns(MONITOR_RUNS),
+    ]);
+
+    const s = scalars.rows[0] ?? {};
+    const finished = runs.filter((r) => r.status === "ok" || r.status === "error");
+    const lastOk = runs.find((r) => r.status === "ok") ?? null;
+    const last = runs[0] ?? null;
+    return {
+      nowUtc: s.now_utc ?? new Date().toISOString(),
+      ingest: {
+        lastStartedAt: last?.startedAt ?? null,
+        lastStatus: last?.status ?? null,
+        lastError: last?.error ?? null,
+        recentStatuses: finished.map((r) => r.status),
+        lastOk: lastOk ? { startedAt: lastOk.startedAt, modelsSeen: lastOk.modelsSeen, usageRows: lastOk.usageRows } : null,
+      },
+      latest: {
+        catalog: s.catalog_at ?? null,
+        priceChange: s.price_change_at ?? null,
+        usageModel: s.usage_model_at ?? null,
+        usageProvider: s.usage_provider_at ?? null,
+        effectivePrice: s.effective_price_at ?? null,
+        providerVolume: s.provider_volume_at ?? null,
+        marketSnapshot: s.market_snapshot_at ?? null,
+        gpuSweep: s.gpu_sweep_at ?? null,
+      },
+      catalog: {
+        total: Number(s.models_total ?? 0),
+        active: Number(s.models_active ?? 0),
+        activeMedian7d: num(s.models_active_median),
+      },
+      usage: {
+        firstDate: s.usage_first ?? null,
+        lastDate: s.usage_last ?? null,
+        missingDates: missing.rows.map((r) => r.date),
+        daily: daily.rows.map((row) => ({
+          date: toDateString(row.date),
+          tokens: num(row.tokens),
+          spendUsd: num(row.spend),
+        })),
+      },
+      gpu: { accelerators: Number(s.gpu_rows ?? 0), withOffers: Number(s.gpu_with_offers ?? 0) },
+    };
+  }
+
   async getDatabaseStats(): Promise<{ totalSizeBytes: string; tables: DatabaseTableStats[] }> {
     const tableNames = ["models", "price_points", "usage_snapshots", "market_snapshots", "ingest_runs", "kv_state"];
     const [dbSize, ...tableStats] = await Promise.all([
@@ -1865,6 +1974,11 @@ function resolveLimit(requested: number | undefined, hardMax = MAX_ROWS): number
   if (requested === undefined) return hardMax;
   if (!Number.isFinite(requested) || requested < 1) return 1;
   return Math.min(Math.floor(requested), hardMax);
+}
+
+/** Render a timestamptz expression as an ISO-8601 Z string, whatever the server timezone. */
+function isoUtc(expr: string): string {
+  return `to_char(${expr} AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS"Z"')`;
 }
 
 function quoteIdent(name: string): string {

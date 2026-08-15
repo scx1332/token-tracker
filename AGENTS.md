@@ -18,6 +18,7 @@ bun install
 bun test                                        # unit only (DB tests self-skip)
 TEST_DATABASE_URL=postgres://tokens:tokens@localhost:55432/tokens bun test
 bun run typecheck
+bun run prod-check                              # test the live deployment (PROD_BASE_URL)
 
 DATABASE_URL=... OPENROUTER_API_KEY=... bun run ingest-once   # one pass
 DATABASE_URL=... OPENROUTER_API_KEY=... bun run backfill      # deep history
@@ -104,7 +105,16 @@ docker compose up -d --build                    # full stack (or ./deploy.sh)
   we do not observe. `frontend/src/gpu.ts` rebases both to 100 and the UI
   compares slopes. `usdPerMtokFloor` exists but is an explicit lower bound.
 - **Keep tests hermetic.** `bun test` must pass with no DB and no network;
-  storage/server tests skip unless `TEST_DATABASE_URL` (or `DATABASE_URL`) is set.
+  storage/server tests skip unless `TEST_DATABASE_URL` (or `DATABASE_URL`) is
+  set, and `production.test.ts` unless `PROD_BASE_URL` is.
+- **`/health` always answers 200; `/status` is the one that judges.** Docker's
+  healthcheck hits `/health`, and restarting the API fixes none of the
+  conditions `/status` reports — a failing `/status` answers 503 instead, for
+  uptime pingers. Every threshold in `src/monitor.ts` is derived from a source's
+  real cadence (hourly pass, 20h sweep gate, 15-minute GPU clock, 03:30 backup
+  cron); change a cadence and the matching threshold has to move with it. Keep
+  the checks pure and add the failure mode to `monitor.test.ts` — an alarm
+  nobody has watched fire is not coverage.
 - **Spend is an estimate** (tokens × observed effective rates where the daily
   sweep has them — these embed cache discounts — with list price as fallback).
   OpenRouter has no total‑revenue endpoint; never present spend as billed
@@ -123,6 +133,11 @@ docker compose up -d --build                    # full stack (or ./deploy.sh)
   tests. BIGINT/NUMERIC kept as strings; DATE kept raw.
 - `src/ingest.ts` — one pass: catalog + model prices → provider prices →
   usage → market snapshot. `src/ingestLoop.ts` loops + runs a one‑time backfill.
+- `src/monitor.ts` — the production checks (pure): each source's freshness, the
+  last closed day sized against the trailing week, holes in the usage series,
+  the backup's age. `/status` runs them against `Storage.getMonitorFacts()`;
+  `src/production.test.ts` turns each one into a test against the live site, and
+  the hourly `production-check.yml` workflow is what emails when one fails.
 - `src/server.ts` — `Bun.serve` JSON API with CORS. Entry: `src/serve.ts`.
   `/model/provider-prices?id=` returns the full per‑provider price change‑log plus
   the provider list; the frontend (`frontend/src/price.ts`, pure + unit‑tested)

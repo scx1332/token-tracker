@@ -109,6 +109,7 @@ All endpoints are JSON, CORS‑enabled, served under `/api` by nginx.
 | Route | Description |
 | --- | --- |
 | `GET /health` | build info, ingest status, data coverage, DB stats |
+| `GET /status` | the production checks, evaluated live — `503` when any of them fails |
 | `GET /market?days=120` | latest snapshot, spend/token series, price‑index history, top models, top apps, weekly chart |
 | `GET /models?search=&author=&limit=` | all models with latest price + latest usage |
 | `GET /models/featured?limit=16` | frontier‑pinned + top‑by‑usage |
@@ -196,6 +197,60 @@ Restore, from this directory:
 The dump carries `DROP ... IF EXISTS` for everything it recreates, so it
 restores over a live database as well as into an empty one — destructive by
 design, so aim it deliberately.
+
+Nightly, `.github/workflows/backup-verify.yml` pulls the newest archive off the
+host, restores it into an empty Postgres, boots the real backend against it and
+smoke‑tests the API (`scripts/verify-restore.sql`), then keeps the copy as a
+private GHCR package. A backup nobody has restored is a hope, not a backup.
+
+### Is it still scraping?
+
+A scraper that stops does not crash. The container stays up, the pass still
+reports `ok`, every page still renders — and one chart quietly stops moving.
+That is the failure this project is actually exposed to, so it gets its own
+tests.
+
+```bash
+bun run prod-check                                # test the live deployment
+PROD_BASE_URL=https://staging.example bun run prod-check
+PROD_API_URL=http://127.0.0.1:28470 bun test src/production.test.ts
+```
+
+`GET /api/status` is the deployment judging itself. `src/monitor.ts` holds the
+judgements — pure, so `src/monitor.test.ts` can run them against fixtures of
+every failure mode, because an untested alarm is worse than no alarm — and
+`Storage.getMonitorFacts()` feeds it the facts:
+
+- **Each source separately**, by the age of its newest row: the hourly pass, the
+  catalog, the rankings feed, per‑provider usage, effective prices, provider
+  volume, market snapshots, the 15‑minute vast.ai sweep, the price change‑log.
+  Thresholds come from each source's real cadence, so a dead vast.ai reads as a
+  dead vast.ai and not as a dead market.
+- **The last closed day, sized against the week before it**, in tokens and in
+  dollars. Freshness only proves rows arrived; this proves they arrived *whole*.
+  A capture that dies mid‑day writes a perfectly fresh row holding half a day.
+  Both sides are fenced: the endpoint double‑count that inflated history 2–2.5×
+  would have failed here too.
+- **The history itself** — no missing days between the first and the last, and
+  the floor still at 2026‑05‑18. A day missed today can never be re‑fetched
+  (§5 of `knowledge.md`), so a hole is permanent and worth shouting about.
+- **The backup**, by the age and size of the newest archive.
+- **From outside**, which `/status` cannot see at all: nginx routing, the
+  frontend and its assets, the TLS certificate's remaining days, and the actual
+  JSON each page consumes.
+
+`fail` means data is being lost right now or a number on the site is wrong;
+`warn` means unusual but nothing is lost by waiting; `skip` means the fact
+needed to judge it is not available here (no backup mount on a dev box).
+Anything OpenRouter or vast.ai may legitimately do on a quiet day is a `warn` at
+most — an alarm that cries wolf gets muted. `/status` answers `503` when
+anything fails, so a plain uptime pinger is a usable alarm too, while `/health`
+stays `200` throughout: Docker restarts the container on an unhealthy check and
+restarting the API fixes none of these.
+
+`.github/workflows/production-check.yml` runs all of it hourly and emails on
+failure. Each check becomes one test, so the mail names `gpu.sweep` rather than
+"production", and the job summary is the whole table either way.
 
 ## Scraping notes
 

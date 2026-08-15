@@ -10,6 +10,7 @@
     "backfill": "bun run src/backfill.ts",
     "serve": "bun run src/serve.ts",
     "test": "bun test",
+    "prod-check": "PROD_BASE_URL=${PROD_BASE_URL:-https://token-tracker.arkiv-global.net} bun test src/production.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {

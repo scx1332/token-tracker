@@ -143,6 +143,14 @@ it. The May 2026 stub is the precedent: patched in SQL, then trimmed.
 One-off repair scripts live in `scratch/` (gitignored) with their reasoning in
 comments; they are records, not tools — none of them can apply twice.
 
+Which is also why two of the production checks (`src/monitor.ts`, served at
+`/status`) are about history rather than uptime: `usage.gaps` fails if any day
+between the first and the last has no rows, and `usage.floor` fails if the
+series stops starting on 2026-05-18. Both describe damage that no amount of
+re-running can undo, so they are worth hearing about the same day rather than
+the next time someone looks at a chart. If the floor is ever moved deliberately,
+move the constant with it.
+
 Which makes the daily backup part of the data story, not just ops: once a day
 has aged out of the source's window, **our database is the only copy of it
 anywhere**. `scripts/backup-db.sh` (cron, 03:30 local, → `~/backups/token-tracker/`,
