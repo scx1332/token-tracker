@@ -1,3 +1,4 @@
+import { encodeModelId } from "../routes";
 import { useEffect, useMemo, useState } from "react";
 import { api, type ModelWithLatest } from "../api";
 import { Badge, Loading, ErrorNote } from "../components";
@@ -111,7 +112,7 @@ export function ModelsView({ navigate }: { navigate: (to: string) => void }) {
           </thead>
           <tbody>
             {rows.slice(0, 600).map((m) => (
-              <tr key={m.modelId} onClick={() => navigate(`/model/${encodeURIComponent(m.modelId)}`)}>
+              <tr key={m.modelId} onClick={() => navigate(`/model/${encodeModelId(m.modelId)}`)}>
                 <td className="left">
                   <div className="model-cell">
                     <span className="model-name">

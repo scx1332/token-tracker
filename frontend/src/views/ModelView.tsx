@@ -1,3 +1,4 @@
+import { encodeModelId } from "../routes";
 import { useEffect, useState } from "react";
 import { api, type ModelDetail } from "../api";
 import { Badge, Panel, Loading, ErrorNote, Empty } from "../components";
@@ -63,10 +64,10 @@ export function ModelView({ modelId, navigate }: { modelId: string; navigate: (t
           </div>
           <a
             className="btn-primary"
-            href={`/explorer/${encodeURIComponent(m.modelId)}`}
+            href={`/explorer/${encodeModelId(m.modelId)}`}
             onClick={(e) => {
               e.preventDefault();
-              navigate(`/explorer/${encodeURIComponent(m.modelId)}`);
+              navigate(`/explorer/${encodeModelId(m.modelId)}`);
             }}
           >
             Price Explorer →
@@ -141,7 +142,7 @@ export function ModelView({ modelId, navigate }: { modelId: string; navigate: (t
               {providerPrices.map((p, i) => (
                 <tr
                   key={p.provider + i}
-                  onClick={() => navigate(`/explorer/${encodeURIComponent(m.modelId)}?provider=${encodeURIComponent(p.provider)}`)}
+                  onClick={() => navigate(`/explorer/${encodeModelId(m.modelId)}?provider=${encodeURIComponent(p.provider)}`)}
                 >
                   <td className="left" style={{ fontFamily: "var(--font-body)", fontWeight: 500 }}>
                     {p.provider}

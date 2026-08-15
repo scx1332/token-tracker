@@ -1,3 +1,4 @@
+import { encodeModelId } from "../routes";
 import { useEffect, useMemo, useState } from "react";
 import { api, type HealthResponse, type MarketResponse } from "../api";
 import { Kpi, Panel, SectionHead, RankList, Loading, ErrorNote, type RankItem } from "../components";
@@ -120,7 +121,7 @@ export function MarketView({ navigate }: { navigate: (to: string) => void }) {
       value: m.spendUsd,
       valueLabel: `${usd(m.spendUsd)} · ${compact(m.tokens)} tok`,
       frac: (m.spendUsd ?? 0) / (max || 1),
-      href: `/model/${encodeURIComponent(m.modelId)}`,
+      href: `/model/${encodeModelId(m.modelId)}`,
       color: C.gold,
     };
   });

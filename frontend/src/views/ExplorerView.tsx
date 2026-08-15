@@ -1,3 +1,4 @@
+import { encodeModelId } from "../routes";
 import { useEffect, useMemo, useState } from "react";
 import { api, type ModelDetail, type ModelWithLatest, type ProviderPricesResponse, type ProviderVolumeResponse } from "../api";
 import { Panel, Loading, ErrorNote, Empty, Badge } from "../components";
@@ -110,7 +111,7 @@ export function ExplorerView({
   useEffect(() => {
     if (!modelId) return;
     const q = selected.length ? `?provider=${selected.map(encodeURIComponent).join(",")}` : "";
-    const target = `/explorer/${encodeURIComponent(modelId)}${q}`;
+    const target = `/explorer/${encodeModelId(modelId)}${q}`;
     if (window.location.pathname + window.location.search !== target) window.history.replaceState(null, "", target);
   }, [modelId, selected]);
 
@@ -384,10 +385,10 @@ export function ExplorerView({
           {model && (
             <a
               className="ghost-link"
-              href={`/model/${encodeURIComponent(model.modelId)}`}
+              href={`/model/${encodeModelId(model.modelId)}`}
               onClick={(e) => {
                 e.preventDefault();
-                navigate(`/model/${encodeURIComponent(model.modelId)}`);
+                navigate(`/model/${encodeModelId(model.modelId)}`);
               }}
             >
               Model details →

@@ -1,3 +1,4 @@
+import { encodeModelId } from "../routes";
 import { useEffect, useMemo, useState } from "react";
 import { api, type ProviderStat, type ProvidersMarketResponse } from "../api";
 import { Loading, ErrorNote, Panel, SectionHead } from "../components";
@@ -236,7 +237,7 @@ export function ProvidersView({ navigate }: { navigate: (to: string) => void }) 
                     <span
                       key={c.modelId}
                       className={c.modelId === "__rest__" ? "" : "comp-link"}
-                      onClick={() => c.modelId !== "__rest__" && navigate(`/model/${encodeURIComponent(c.modelId)}`)}
+                      onClick={() => c.modelId !== "__rest__" && navigate(`/model/${encodeModelId(c.modelId)}`)}
                     >
                       <i style={{ background: c.color }} /> {c.label} {(c.share * 100).toFixed(0)}%
                     </span>

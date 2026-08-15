@@ -2,6 +2,7 @@ import { useEffect, useState, type MouseEvent } from "react";
 import { api, type HealthResponse } from "./api";
 import { Stat } from "./components";
 import { compact, relTime } from "./format";
+import { safeDecode } from "./routes";
 import { MarketView } from "./views/MarketView";
 import { ExplorerView } from "./views/ExplorerView";
 import { ModelsView } from "./views/ModelsView";
@@ -140,12 +141,12 @@ function parseRoute(fullPath: string): Route {
   const path = pathPart ?? "";
   const query = new URLSearchParams(queryPart ?? "");
   if (path.startsWith("model/")) {
-    return { name: "model", id: decodeURIComponent(path.slice("model/".length)) };
+    return { name: "model", id: safeDecode(path.slice("model/".length)) };
   }
   if (path.startsWith("explorer")) {
     const rest = path.slice("explorer".length).replace(/^\//, "");
     const route: Route = { name: "explorer" };
-    if (rest) route.id = decodeURIComponent(rest);
+    if (rest) route.id = safeDecode(rest);
     const provider = query.get("provider");
     if (provider) route.provider = provider;
     return route;
