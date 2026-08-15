@@ -114,7 +114,7 @@ export function MarketView({ navigate }: { navigate: (to: string) => void }) {
   const cheapest = latest?.cheapestFrontierUsdPerMtok ?? null;
 
   // Ranked by est. spend (price × tokens) — free-token volume alone doesn't move money.
-  const topModelItems: RankItem[] = market.topModels.slice(0, 10).map((m) => {
+  const topModelItems: RankItem[] = market.topModels.slice(0, 15).map((m) => {
     const max = market.topModels[0]?.spendUsd ?? 1;
     return {
       name: displayName(m.name),
