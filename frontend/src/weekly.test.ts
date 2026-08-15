@@ -128,16 +128,28 @@ describe("forecastCurrentWeek", () => {
     expect(f!.observed).toBe(30);
     expect(f!.covered).toBeCloseTo(0.5, 6); // 3 weekdays × 10/60
     expect(f!.projected).toBeCloseTo(60, 6); // not 30/3×7 = 70
-    expect(f!.partialToday).toBe(false);
+    expect(f!.runningDayValue).toBeNull();
     expect(f!.weekendRatio).toBeCloseTo(0.5, 6);
   });
 
-  it("credits a still-running day pro-rata to the hour", () => {
+  // The day in progress is reported so the bar and the note can show it, and
+  // kept out of the projection entirely: this portal forecasts weeks, not days.
+  it("reports a still-running day without projecting from it", () => {
     const series = [...history, ...shapedSeries(["2026-08-03"], 3), day("2026-08-06", 5, 500)];
     const f = forecastCurrentWeek(series, "spend", Date.parse("2026-08-06T12:00:00Z"));
-    expect(f!.partialToday).toBe(true);
-    expect(f!.daysCovered).toBe(4);
-    expect(f!.covered).toBeCloseTo(0.5 + (10 / 60) * 0.5, 6);
+    expect(f!.runningDayValue).toBe(5);
+    // Unchanged from the same week without today's partial row in it.
+    expect(f!.daysCovered).toBe(3);
+    expect(f!.observed).toBe(30);
+    expect(f!.covered).toBeCloseTo(0.5, 6);
+    expect(f!.projected).toBeCloseTo(60, 6);
+  });
+
+  it("does not scale a half-finished day up, however big it looks", () => {
+    // Thursday lands at 9 of a normal 10 by mid-morning — a real possibility on
+    // a busy day, and pro-rata credit turned it into a 3× week.
+    const series = [...history, ...shapedSeries(["2026-08-03"], 3), day("2026-08-06", 9, 900)];
+    const f = forecastCurrentWeek(series, "spend", Date.parse("2026-08-06T04:00:00Z"));
     expect(f!.projected).toBeCloseTo(60, 6);
   });
 
@@ -146,5 +158,12 @@ describe("forecastCurrentWeek", () => {
     const thin = [...history, day("2026-08-03T00:00:00Z", 1, 1)];
     const f = forecastCurrentWeek(thin, "spend", Date.parse("2026-08-03T01:00:00Z"));
     expect(f).toBeNull(); // only a sliver of Monday booked
+  });
+
+  it("returns null for a week whose only day is still running", () => {
+    // Monday, mid-morning. There is nothing finished to project from, so the
+    // honest answer is no projection rather than a number built from one hour.
+    const series = [...history, day("2026-08-03", 4, 400)];
+    expect(forecastCurrentWeek(series, "spend", Date.parse("2026-08-03T09:00:00Z"))).toBeNull();
   });
 });

@@ -5,6 +5,7 @@ import { Kpi, Panel, SectionHead, RankList, Loading, ErrorNote, type RankItem } 
 import { SpendTokensChart, PriceIndexChart, WeeklyBarsChart, WeeklyRaceChart, ComputeVsTokensChart, C } from "../charts";
 import { usd, usdExact, compact, mtok, relTime, seriesChange, displayName, pct } from "../format";
 import { forecastCurrentWeek, toWeeklyBuckets, trimLeadingPartial } from "../weekly";
+import { closedOnly } from "../runningDay";
 import { buildComparison } from "../gpu";
 import type { GpuDailyRow } from "../api";
 
@@ -70,8 +71,11 @@ export function MarketView({ navigate }: { navigate: (to: string) => void }) {
 
   const latest = market.latest;
   const series = market.series;
-  const spendSeries = series.map((s) => s.totalSpendUsd);
-  const tokenSeries = series.map((s) => s.totalTokens);
+  // Charts get every day, today included and shaded. Anything that compares or
+  // averages gets whole days only — see runningDay.ts.
+  const closedSeries = closedOnly(series, (s) => s.bucketDate, Date.now());
+  const spendSeries = closedSeries.map((s) => s.totalSpendUsd);
+  const tokenSeries = closedSeries.map((s) => s.totalTokens);
   const weightedSeries = market.priceIndex.map((s) => s.weightedUsdPerMtok);
 
   // Week-over-week reads off the last two COMPLETE weeks — the running week is
@@ -198,6 +202,7 @@ export function MarketView({ navigate }: { navigate: (to: string) => void }) {
               <div className="chart-title">Estimated daily spend &amp; throughput</div>
               <div className="chart-note">
                 tokens × effective paid rate · last 120 days · {includeFree ? "incl. free models" : "paid models only"}
+                {series.length > closedSeries.length ? " · dotted leg into the shaded band is today, still counting" : ""}
               </div>
             </div>
             <div className="legend">
@@ -283,7 +288,10 @@ export function MarketView({ navigate }: { navigate: (to: string) => void }) {
               {weekForecast.weekendRatio !== null
                 ? ` (a weekend day runs ${Math.round((1 - weekForecast.weekendRatio) * 100)}% below a weekday, so the days still to come are not counted flat)`
                 : ""}
-              . {weekForecast.partialToday ? "Today is credited pro-rata to the hour it has reached (UTC)." : "OpenRouter publishes complete days only, so today is not booked yet and rides entirely on the projection."}
+              .{" "}
+              {weekForecast.runningDayValue !== null
+                ? `Today's ${weekFmt(weekForecast.runningDayValue)} so far is on the bar but not in that arithmetic — a day still running is never scaled up to a full one.`
+                : "OpenRouter publishes complete days only, so today is not booked yet and rides entirely on the projection."}
             </div>
           </div>
         ) : null}

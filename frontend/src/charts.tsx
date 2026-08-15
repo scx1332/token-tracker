@@ -4,6 +4,7 @@ import type { Layout, Config, Data } from "plotly.js-dist-min";
 import { useMemo } from "react";
 import type { PriceHistoryRow, UsageRow, UsageSeriesPoint } from "./api";
 import type { WeekBucket, WeekDayCell } from "./weekly";
+import { isClosedDay } from "./runningDay";
 
 export const Plot = createPlotlyComponent(Plotly);
 
@@ -111,6 +112,83 @@ function xdates(
   key: "bucketDate" | "observedAt" | "date",
 ): string[] {
   return rows.map((r) => (r as Record<string, string>)[key]);
+}
+
+// ---------------------------------------------------------------------------
+// The day still filling
+// ---------------------------------------------------------------------------
+//
+// Daily series are sums, so their newest bucket is short until the day ends
+// (see runningDay.ts). It is shown rather than hidden — but a solid line
+// running into a half-counted day reads as a collapse, so it gets its own
+// treatment everywhere: the closed days keep the solid line, the day in
+// progress hangs off the end as a dotted tail, and a shaded band behind it
+// carries the label. Never a projection — this portal forecasts weeks, not days.
+
+const RUNNING_FILL = "rgba(17,23,34,0.06)";
+const RUNNING_LABEL = "still filling";
+
+/** Index of the first point whose day has not ended, or -1 when all have. */
+function runningIndex(dates: string[], nowMs: number): number {
+  return dates.findIndex((d) => d && !isClosedDay(d, nowMs));
+}
+
+/**
+ * The solid part: values up to the last closed day, then nulls. A series with
+ * nothing but a running day in it (idx 0) is drawn plainly — there is no
+ * closed day to hang a tail off, and one point draws no line either way.
+ */
+function untilRunning<T>(y: T[], idx: number): (T | null)[] {
+  return idx < 1 ? y : y.map((v, i) => (i < idx ? v : null));
+}
+
+/**
+ * The dotted part: the last closed day joined to the day in progress. Same
+ * length and same x as the solid trace, nulls everywhere else — which is how
+ * Plotly draws one line in two styles without duplicating the axis.
+ */
+function fromRunning<T>(y: T[], idx: number): (T | null)[] {
+  return y.map((v, i) => (i === idx - 1 || i >= idx ? v : null));
+}
+
+/** Shaded band + label over the day in progress, for any date-axis chart. */
+function runningDayMarks(dates: string[], idx: number): Partial<Layout> {
+  if (idx < 1) return {};
+  return {
+    shapes: [
+      {
+        type: "rect",
+        xref: "x",
+        yref: "paper",
+        x0: dates[idx - 1]!,
+        x1: dates[dates.length - 1]!,
+        y0: 0,
+        y1: 1,
+        fillcolor: RUNNING_FILL,
+        line: { width: 0 },
+        layer: "below",
+      },
+    ],
+    // Set vertically inside the band. A horizontal label has nowhere to go: the
+    // band is one day wide (~10px), the right edge is where the axis labels
+    // live, above is either a tight margin or the legend, and any of those
+    // clips it or lands it on top of the series it is describing.
+    annotations: [
+      {
+        x: dates[dates.length - 1]!,
+        xref: "x",
+        xshift: -6,
+        y: 0.5,
+        yref: "paper",
+        xanchor: "center",
+        yanchor: "middle",
+        textangle: "-90",
+        text: RUNNING_LABEL,
+        showarrow: false,
+        font: { family: FONT, size: 9, color: C.muted },
+      },
+    ],
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -284,16 +362,27 @@ export function ProviderOrderBookChart({
 // ---------------------------------------------------------------------------
 
 /** Estimated daily spend (amber area) + daily tokens (teal line, 2nd axis). */
-export function SpendTokensChart({ series, height = 300 }: { series: UsageSeriesPoint[]; height?: number }) {
-  const data = useMemo<Data[]>(() => {
+export function SpendTokensChart({
+  series,
+  height = 300,
+  nowMs = Date.now(),
+}: {
+  series: UsageSeriesPoint[];
+  height?: number;
+  nowMs?: number;
+}) {
+  const { data, marks } = useMemo(() => {
     const x = xdates(series, "bucketDate");
-    return [
+    const idx = runningIndex(x, nowMs);
+    const spend = series.map((s) => s.totalSpendUsd);
+    const tokens = series.map((s) => s.totalTokens);
+    const out: Data[] = [
       {
         type: "scatter",
         mode: "lines",
         name: "Est. spend",
         x,
-        y: series.map((s) => s.totalSpendUsd),
+        y: untilRunning(spend, idx),
         line: { color: C.amber, width: 2 },
         fill: "tozeroy",
         fillcolor: "rgba(176,106,6,0.07)",
@@ -305,19 +394,49 @@ export function SpendTokensChart({ series, height = 300 }: { series: UsageSeries
         mode: "lines",
         name: "Tokens",
         x,
-        y: series.map((s) => s.totalTokens),
+        y: untilRunning(tokens, idx),
         line: { color: C.teal, width: 1.8 },
         yaxis: "y2",
         hovertemplate: "%{y:.3s} tok<extra>tokens</extra>",
       },
     ];
-  }, [series]);
+    // The day in progress: the same two series, dotted, so the last leg reads
+    // as "counting" rather than as a fall.
+    if (idx > 0) {
+      out.push(
+        {
+          type: "scatter",
+          mode: "lines",
+          name: "Est. spend (today)",
+          x,
+          y: fromRunning(spend, idx),
+          line: { color: C.amber, width: 2, dash: "dot" },
+          fill: "tozeroy",
+          fillcolor: "rgba(176,106,6,0.035)",
+          yaxis: "y",
+          hovertemplate: "$%{y:,.0f}<extra>spend so far today</extra>",
+        },
+        {
+          type: "scatter",
+          mode: "lines",
+          name: "Tokens (today)",
+          x,
+          y: fromRunning(tokens, idx),
+          line: { color: C.teal, width: 1.8, dash: "dot" },
+          yaxis: "y2",
+          hovertemplate: "%{y:.3s} tok<extra>tokens so far today</extra>",
+        },
+      );
+    }
+    return { data: out, marks: runningDayMarks(x, idx) };
+  }, [series, nowMs]);
 
   const layout = baseLayout({
     height,
     margin: { l: 60, r: 56, t: 12, b: 34 },
     yaxis: { gridcolor: C.grid, showgrid: true, zeroline: false, tickfont: { family: FONT, color: C.amber, size: 10 }, tickprefix: "$", tickformat: ".2s" },
     yaxis2: { overlaying: "y", side: "right", showgrid: false, zeroline: false, tickfont: { family: FONT, color: C.teal, size: 10 }, tickformat: ".2s" },
+    ...marks,
   });
 
   return <Plot data={data} layout={layout} config={baseConfig} className="plot" style={{ width: "100%", height }} useResizeHandler />;
@@ -904,16 +1023,27 @@ export function PriceHistoryChart({ rows, height = 300 }: { rows: PriceHistoryRo
 }
 
 /** Model usage history: estimated spend (amber area, primary) + daily tokens (teal line, 2nd axis). */
-export function UsageHistoryChart({ rows, height = 300 }: { rows: UsageRow[]; height?: number }) {
-  const data = useMemo<Data[]>(() => {
+export function UsageHistoryChart({
+  rows,
+  height = 300,
+  nowMs = Date.now(),
+}: {
+  rows: UsageRow[];
+  height?: number;
+  nowMs?: number;
+}) {
+  const { data, marks } = useMemo(() => {
     const x = xdates(rows, "bucketDate");
-    return [
+    const idx = runningIndex(x, nowMs);
+    const spend = rows.map((r) => r.estimatedSpendUsd);
+    const tokens = rows.map((r) => r.tokens);
+    const out: Data[] = [
       {
         type: "scatter",
         mode: "lines",
         name: "Est. spend",
         x,
-        y: rows.map((r) => r.estimatedSpendUsd),
+        y: untilRunning(spend, idx),
         line: { color: C.amber, width: 2 },
         fill: "tozeroy",
         fillcolor: "rgba(176,106,6,0.07)",
@@ -924,19 +1054,46 @@ export function UsageHistoryChart({ rows, height = 300 }: { rows: UsageRow[]; he
         mode: "lines",
         name: "Tokens",
         x,
-        y: rows.map((r) => r.tokens),
+        y: untilRunning(tokens, idx),
         line: { color: C.teal, width: 1.4 },
         yaxis: "y2",
         hovertemplate: "%{y:.3s} tok<extra>tokens</extra>",
       },
     ];
-  }, [rows]);
+    if (idx > 0) {
+      out.push(
+        {
+          type: "scatter",
+          mode: "lines",
+          name: "Est. spend (today)",
+          x,
+          y: fromRunning(spend, idx),
+          line: { color: C.amber, width: 2, dash: "dot" },
+          fill: "tozeroy",
+          fillcolor: "rgba(176,106,6,0.035)",
+          hovertemplate: "$%{y:,.0f}<extra>spend so far today</extra>",
+        },
+        {
+          type: "scatter",
+          mode: "lines",
+          name: "Tokens (today)",
+          x,
+          y: fromRunning(tokens, idx),
+          line: { color: C.teal, width: 1.4, dash: "dot" },
+          yaxis: "y2",
+          hovertemplate: "%{y:.3s} tok<extra>tokens so far today</extra>",
+        },
+      );
+    }
+    return { data: out, marks: runningDayMarks(x, idx) };
+  }, [rows, nowMs]);
 
   const layout = baseLayout({
     height,
     margin: { l: 56, r: 56, t: 12, b: 34 },
     yaxis: { gridcolor: C.grid, showgrid: true, zeroline: false, tickprefix: "$", tickformat: ".2s", tickfont: { family: FONT, color: C.amber, size: 10 } },
     yaxis2: { overlaying: "y", side: "right", showgrid: false, zeroline: false, tickformat: ".2s", tickfont: { family: FONT, color: C.teal, size: 10 } },
+    ...marks,
   });
   return <Plot data={data} layout={layout} config={baseConfig} className="plot" style={{ width: "100%", height }} useResizeHandler />;
 }
@@ -1023,12 +1180,20 @@ export function ProviderRevenueChart({
   mode,
   height = 320,
   benchmark = null,
+  nowMs = Date.now(),
 }: {
   traces: { name: string; x: string[]; y: (number | null)[]; color: string }[];
   mode: "spend" | "tokens";
   height?: number;
   benchmark?: { name: string; x: string[]; y: (number | null)[] } | null;
+  nowMs?: number;
 }) {
+  // The tape always carries a day in progress — the per-provider sweep writes
+  // it every pass — so the band is the normal state here, not the exception.
+  // A stacked area cannot go dotted without unstacking, so the shading and its
+  // label do the whole job.
+  const marks = useMemo(() => runningDayMarks(traces[0]?.x ?? [], runningIndex(traces[0]?.x ?? [], nowMs)), [traces, nowMs]);
+
   const data = useMemo<Data[]>(() => {
     const out: Data[] = traces.map((t) => ({
       type: "scatter",
@@ -1069,6 +1234,7 @@ export function ProviderRevenueChart({
       tickfont: { family: FONT, color: C.tick, size: 10 },
     },
     xaxis: { gridcolor: C.grid, showgrid: false, ...AXIS_SPIKE, tickfont: { family: FONT, color: C.tick, size: 10 } },
+    ...marks,
   });
 
   return <Plot data={data} layout={layout} config={baseConfig} className="plot" style={{ width: "100%", height }} useResizeHandler />;

@@ -99,6 +99,11 @@ what completes it is the next sweep re-fetching the same ~90-day window with
 `onConflict: "update"` within ~21 hours. Nothing else restates those rows —
 rankings only ever writes `provider=''`.
 
+Both are drawn rather than hidden, inside a shaded "still filling" band
+(`frontend/src/runningDay.ts`), and both are kept out of every average — a
+7-day desk figure that includes a half-counted day reads ~7% light. No single
+day is ever extrapolated: the week is the smallest thing this site forecasts.
+
 ---
 
 ## 3. Spend is an estimate, and here is its exact recipe

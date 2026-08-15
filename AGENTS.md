@@ -100,6 +100,18 @@ docker compose up -d --build                    # full stack (or ./deploy.sh)
   the sweeps' values (a deep-book sweep must not outvote a thin one); depth =
   peak. The day column is `TO_CHAR(... 'YYYY-MM-DD')` TEXT on purpose — a
   `::date` would depend on which pool's type parser runs the query.
+- **A day that has not ended is shown, marked, and never averaged.** Daily
+  series are sums, so the newest bucket is short until UTC midnight — that is
+  real data, not a dip, and hiding it left the tape mute about the only day
+  anyone asks about. `frontend/src/runningDay.ts` owns the rule: charts draw the
+  day in progress as a dotted leg into a shaded "still filling" band, and
+  anything that averages, compares or ranks calls `closedOnly` first (the
+  providers tape's 7-day desk averages and w/w deltas, the market KPIs' 14-day
+  change, the coverage note). **Nothing extrapolates a single day** —
+  `forecastCurrentWeek` projects a week from its finished days only; the
+  pro-rata-to-the-hour credit it used to give today was removed, because the
+  model-level series does not accumulate through the day at all. GPU price
+  bands are exempt: they are medians of a day's sweeps, not sums.
 - **Compute vs token comparisons are indexed, never converted.** $/GPU-hour and
   $/Mtok do not convert without knowing batch efficiency and model size, which
   we do not observe. `frontend/src/gpu.ts` rebases both to 100 and the UI

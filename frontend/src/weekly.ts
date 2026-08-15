@@ -2,6 +2,7 @@
 // (weekend dips, ingest gaps); weekly bars are what a trend actually looks like.
 
 import type { UsageSeriesPoint } from "./api";
+import { isClosedDay } from "./runningDay";
 
 export interface WeekDayCell {
   /** YYYY-MM-DD. */
@@ -89,19 +90,22 @@ export type WeekMetric = "spend" | "tokens";
 
 export interface WeekForecast {
   weekStart: string;
-  /** Booked so far. */
+  /** Booked over the week's **finished** days — the projection's whole basis. */
   observed: number;
-  /** Full-week estimate: observed ÷ share of a typical week the days cover. */
+  /** Full-week estimate: observed ÷ share of a typical week those days cover. */
   projected: number;
-  /** Share of a normal week the booked days represent (0–1). */
+  /** Share of a normal week the finished days represent (0–1). */
   covered: number;
   daysCovered: number;
   /** Complete weeks the weekday profile was learned from. */
   basisWeeks: number;
   /** Weekend day average ÷ weekday average, from that profile. */
   weekendRatio: number | null;
-  /** True when the newest day is today and was counted pro-rata to the hour. */
-  partialToday: boolean;
+  /**
+   * The day in progress, if this week has one. It is shown on the bar because
+   * it is real, and left out of everything above because it is not a day yet.
+   */
+  runningDayValue: number | null;
 }
 
 const MIN_COVERED = 0.12;
@@ -144,10 +148,20 @@ export function weekdayProfile(series: UsageSeriesPoint[], metric: WeekMetric, l
 }
 
 /**
- * Project the week in progress to a full-week total. Each booked day is credited
- * with the share of a normal week its weekday usually carries; the newest day is
- * credited pro-rata to the hour if it is still running. Returns null when the
- * week is already complete or too little of it is booked to say anything.
+ * Project the week in progress to a full-week total. Each **finished** day is
+ * credited with the share of a normal week its weekday usually carries.
+ *
+ * The day still running is excluded outright — it is the one number on the page
+ * we deliberately do not extrapolate. This used to credit it pro-rata to the
+ * hour, which sounds reasonable and is not: the model-level series does not
+ * accumulate through the day at all (OpenRouter publishes a day once it has
+ * ended), so a value sitting on today is a *coverage* artifact of the repair
+ * path — 6.22T across 203 models against the ~11T across ~500 the day became —
+ * and dividing that by the elapsed hours produced a confident wrong answer that
+ * moved every time it was looked at. Weeks are the unit this portal forecasts.
+ *
+ * Returns null when the week is complete, or when too little of it has finished
+ * to say anything — including a brand-new week whose only day is today.
  */
 export function forecastCurrentWeek(
   series: UsageSeriesPoint[],
@@ -159,19 +173,20 @@ export function forecastCurrentWeek(
   if (!current || current.complete) return null;
 
   const profile = weekdayProfile(series, metric);
-  const today = new Date(nowMs).toISOString().slice(0, 10);
-  const hourFraction = Math.min(1, Math.max(0, (nowMs - toUtc(today)) / DAY_MS));
-
   const days = series.filter((p) => p.bucketDate && weekStartOf(p.bucketDate) === current.weekStart);
   let covered = 0;
   let observed = 0;
-  let partialToday = false;
+  let daysCovered = 0;
+  let runningDayValue: number | null = null;
   for (const point of days) {
+    if (!isClosedDay(point.bucketDate, nowMs)) {
+      runningDayValue = (runningDayValue ?? 0) + valueOf(point, metric);
+      continue;
+    }
     const dow = (new Date(toUtc(point.bucketDate)).getUTCDay() + 6) % 7;
-    const isToday = point.bucketDate.slice(0, 10) === today;
-    if (isToday) partialToday = true;
-    covered += (profile[dow] ?? 1 / 7) * (isToday ? hourFraction : 1);
+    covered += profile[dow] ?? 1 / 7;
     observed += valueOf(point, metric);
+    daysCovered += 1;
   }
   if (covered < MIN_COVERED) return null;
 
@@ -182,9 +197,9 @@ export function forecastCurrentWeek(
     observed,
     projected: observed / covered,
     covered,
-    daysCovered: days.length,
+    daysCovered,
     basisWeeks: Math.min(PROFILE_WEEKS, weeks.filter((w) => w.complete).length),
     weekendRatio: weekdayAvg > 0 ? weekendAvg / weekdayAvg : null,
-    partialToday,
+    runningDayValue,
   };
 }

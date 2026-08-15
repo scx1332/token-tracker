@@ -4,6 +4,7 @@ import { api, type ProviderStat, type ProvidersMarketResponse, type UsageSeriesP
 import { Loading, ErrorNote, Panel, SectionHead } from "../components";
 import { ProviderRevenueChart, Sparkline, PROVIDER_COLORS, C } from "../charts";
 import { usd, compact, mtok, displayName, shortDate } from "../format";
+import { closedOnly } from "../runningDay";
 
 /** Pricing-side display names for usage-side provider slugs. */
 const PROVIDER_LABEL: Record<string, string> = {
@@ -91,17 +92,23 @@ export function ProvidersView({ navigate }: { navigate: (to: string) => void }) 
     };
   }, []);
 
-  // Complete days only — the trailing bucket is partial and reads as a crash.
-  const dates = useMemo(() => {
-    const all = [...new Set((market?.series ?? []).map((s) => s.bucketDate))].sort();
-    return all.slice(0, -1);
-  }, [market]);
+  // Every day the tape covers, today included — the sweep writes the day in
+  // progress on every pass, and hiding it left the tape mute about the only day
+  // anyone is looking at. The chart shades it (see runningDay.ts); everything
+  // that averages or compares uses `closedDates` below instead.
+  const dates = useMemo(
+    () => [...new Set((market?.series ?? []).map((s) => s.bucketDate))].sort(),
+    [market],
+  );
+  const closedDates = useMemo(() => closedOnly(dates, (d) => d, Date.now()), [dates]);
 
   const desks = useMemo<Desk[]>(() => {
-    if (!market || dates.length === 0) return [];
-    const cur7 = new Set(dates.slice(-7));
-    const prev7 = new Set(dates.slice(-14, -7));
-    const daySet = new Set(dates);
+    if (!market || closedDates.length === 0) return [];
+    // Whole days only: a 7-day average that includes a half-counted day reads
+    // every desk ~7% light, and the w/w delta twice that.
+    const cur7 = new Set(closedDates.slice(-7));
+    const prev7 = new Set(closedDates.slice(-14, -7));
+    const daySet = new Set(closedDates);
 
     const byProvider = new Map<string, { cur: number; prev: number; curTok: number; days: Map<string, number>; models: number }>();
     for (const s of market.series) {
@@ -148,11 +155,11 @@ export function ProvidersView({ navigate }: { navigate: (to: string) => void }) 
           prevSpendPerDay: prev7.size >= 7 ? b.prev / 7 : null,
           tokensPerDay: b.curTok / 7,
           modelCount: b.models,
-          spark: dates.map((d) => b.days.get(d) ?? 0),
+          spark: closedDates.map((d) => b.days.get(d) ?? 0),
           composition: top,
         };
       });
-  }, [market, dates]);
+  }, [market, closedDates]);
 
   const traces = useMemo(() => {
     if (!market || dates.length === 0 || desks.length === 0) return [];
@@ -194,9 +201,11 @@ export function ProvidersView({ navigate }: { navigate: (to: string) => void }) 
     return { name: "All models · market total", x: dates, y };
   }, [dates, totals, mode]);
 
-  // Latest day both sides cover: how much of the market the tape actually carries.
+  // Latest day both sides cover: how much of the market the tape actually
+  // carries. Closed days only — the two sides fill at different rates during
+  // the day, so a share taken mid-day measures the clock, not the coverage.
   const coverage = useMemo<Coverage | null>(() => {
-    if (!market || dates.length === 0 || totals.length === 0) return null;
+    if (!market || closedDates.length === 0 || totals.length === 0) return null;
     const byDate = new Map(totals.map((t) => [t.bucketDate, t]));
     const tape = new Map<string, { spend: number; tokens: number }>();
     for (const s of market.series) {
@@ -205,8 +214,8 @@ export function ProvidersView({ navigate }: { navigate: (to: string) => void }) 
       t.tokens += s.tokens ?? 0;
       tape.set(s.bucketDate, t);
     }
-    for (let i = dates.length - 1; i >= 0; i -= 1) {
-      const date = dates[i]!;
+    for (let i = closedDates.length - 1; i >= 0; i -= 1) {
+      const date = closedDates[i]!;
       const whole = byDate.get(date);
       const head = tape.get(date);
       if (!whole || !head || !whole.totalSpendUsd || !whole.totalTokens) continue;
@@ -218,7 +227,7 @@ export function ProvidersView({ navigate }: { navigate: (to: string) => void }) 
       };
     }
     return null;
-  }, [market, dates, totals]);
+  }, [market, closedDates, totals]);
 
   if (error) return <ErrorNote error={error} />;
   if (!market || !stats) return <Loading label="Loading provider market…" />;
@@ -244,8 +253,8 @@ export function ProvidersView({ navigate }: { navigate: (to: string) => void }) 
           <div>
             <div className="chart-title">The revenue tape</div>
             <div className="chart-note mono">
-              {mode === "spend" ? "est. $/day" : "tokens/day"} · stacked · top 10 providers + rest · complete days
-              {benchmark ? " · dotted line = whole market" : ""}
+              {mode === "spend" ? "est. $/day" : "tokens/day"} · stacked · top 10 providers + rest · shaded day is
+              still filling{benchmark ? " · dotted line = whole market" : ""}
             </div>
           </div>
           <div className="seg seg-sm">
