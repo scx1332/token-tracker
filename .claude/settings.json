@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jq -r '.tool_response.filePath // .tool_input.file_path // empty' | { read -r f || exit 0; case \"$f\" in */token-tracker/knowledge.md) ;; *) exit 0;; esac; cd /home/ubuntu/scx1332/token-tracker || exit 0; git add -- knowledge.md || exit 0; if git diff --cached --quiet -- knowledge.md; then exit 0; fi; git commit -q -m \"knowledge.md: auto-sync\" -- knowledge.md && git push -q origin main && echo '{\"systemMessage\":\"knowledge.md committed and pushed\"}' || echo '{\"systemMessage\":\"knowledge.md auto-push FAILED - push manually\"}'; }",
+            "timeout": 60,
+            "statusMessage": "Syncing knowledge.md"
+          }
+        ]
+      }
+    ]
+  }
+}
