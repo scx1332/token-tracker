@@ -179,6 +179,8 @@ export function PriceEnvelopeChart({
       gridcolor: C.grid,
       showgrid: true,
       zeroline: false,
+      // Anchored at $0: a cropped axis turns a stable price into fake swings.
+      rangemode: "tozero",
       tickprefix: "$",
       tickfont: { family: FONT, color: C.tick, size: 10 },
       title: { text: metricLabel, font: { family: FONT, size: 10, color: C.muted } },
