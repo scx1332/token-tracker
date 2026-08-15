@@ -563,15 +563,15 @@ function StatBox({
 }
 
 /**
- * The models that actually matter: top 10 by est. daily spend ∪ top 10 by
+ * The models that actually matter: top 15 by est. daily spend ∪ top 15 by
  * daily tokens (paid, priced models only), deduped by family so dated
  * revisions don't eat two slots. Spend leaders rank first.
  */
 function importantModels(models: ModelWithLatest[]): ModelWithLatest[] {
   const eligible = models.filter((m) => !m.isFree && (m.providerCount ?? 0) > 0);
   const family = (m: ModelWithLatest) => m.modelId.replace(/-\d{4}$/, "");
-  const bySpend = [...eligible].sort((a, b) => (b.latestSpendUsd ?? 0) - (a.latestSpendUsd ?? 0)).slice(0, 10);
-  const byTokens = [...eligible].sort((a, b) => (b.latestTokens ?? 0) - (a.latestTokens ?? 0)).slice(0, 10);
+  const bySpend = [...eligible].sort((a, b) => (b.latestSpendUsd ?? 0) - (a.latestSpendUsd ?? 0)).slice(0, 15);
+  const byTokens = [...eligible].sort((a, b) => (b.latestTokens ?? 0) - (a.latestTokens ?? 0)).slice(0, 15);
   const seen = new Set<string>();
   const out: ModelWithLatest[] = [];
   for (const m of [...bySpend, ...byTokens]) {
