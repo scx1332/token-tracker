@@ -73,6 +73,32 @@ Consequences, both of which are visible on the Providers page:
 latest complete day, which is why deep history had to come from elsewhere at
 all. `view=week` / `view=month` are not time series.
 
+### When a day becomes final
+
+Within an hour of UTC midnight, and then it stops moving. The feed serves
+exactly one date — the day that has ended — and flips at the boundary: measured
+across 2026-08-14/15, the hourly pass read 11.135T (the 13th's final figure) at
+23:57, 11.485T (the 14th's) at 00:57, and 11.486T at every pass for the twenty
+hours after that. +0.01%. **The first pass after midnight already has the whole
+day**, and it keeps rewriting the same date all day with `onConflict: "update"`,
+so it is a value the site can be trusted on immediately.
+
+Which means **the model-level series normally ends on yesterday**, and a row for
+the day in progress only exists when someone has run `bun run backfill`
+mid-day: that sums provider-token-chart across providers for every date in the
+window, including the unfinished one, and plants a partial figure (2026-08-15
+went in at 6.22T across 203 models against the ~11T/500-model day it became).
+It corrects itself at the next midnight — rankings writes `update` and wins,
+while chart writes are `refresh-own` and can never take an authoritative day
+back to partial — so it is cosmetic, but it is worth knowing that the low last
+point on a chart after a repair run is the repair, not the market.
+
+The per-provider tape (`provider<>''`) is the opposite case: the daily sweep
+writes the in-progress day *every* day, so its last bar is always short, and
+what completes it is the next sweep re-fetching the same ~90-day window with
+`onConflict: "update"` within ~21 hours. Nothing else restates those rows —
+rankings only ever writes `provider=''`.
+
 ---
 
 ## 3. Spend is an estimate, and here is its exact recipe

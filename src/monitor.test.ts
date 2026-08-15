@@ -22,16 +22,23 @@ function ago(hours: number): string {
   return new Date(Date.parse(NOW) - hours * 3_600_000).toISOString().replace(/\.\d{3}Z$/, "Z");
 }
 
-/** A dense, healthy daily series ending on the current (partial) UTC day. */
+/**
+ * A dense, healthy daily series. It ends on *yesterday*: `rankings?view=day`
+ * publishes one date, the day that has ended, and flips within an hour of UTC
+ * midnight — so the current day is normally absent entirely.
+ */
 function healthyDaily(): UsageDay[] {
   const days: UsageDay[] = [];
   for (let i = 12; i >= 1; i -= 1) {
     const date = new Date(Date.parse("2026-08-15T00:00:00Z") - i * 86_400_000).toISOString().slice(0, 10);
     days.push({ date, tokens: 10_000_000_000_000, spendUsd: 3_500_000 });
   }
-  // Today is always partial — the feed fills it as the day runs.
-  days.push({ date: "2026-08-15", tokens: 5_600_000_000_000, spendUsd: 1_900_000 });
   return days;
+}
+
+/** …unless a mid-day `bun run backfill` planted a partial row for today. */
+function withPartialToday(daily: UsageDay[]): UsageDay[] {
+  return [...daily, { date: "2026-08-15", tokens: 5_600_000_000_000, spendUsd: 1_900_000 }];
 }
 
 /** A deployment where everything works, as the facts would read right now. */
@@ -58,7 +65,7 @@ function healthy(overrides: Partial<MonitorFacts> = {}): MonitorFacts {
     catalog: { total: 414, active: 413, activeMedian7d: 411 },
     usage: {
       firstDate: USAGE_HISTORY_FLOOR,
-      lastDate: "2026-08-15",
+      lastDate: "2026-08-14",
       missingDates: [],
       daily: healthyDaily(),
     },
@@ -193,11 +200,22 @@ describe("one source stops while the rest keep going", () => {
 });
 
 describe("the usage series", () => {
-  it("fails when the newest bucket falls two days behind", () => {
+  // The feed publishes a day once it has ended, so the newest bucket being
+  // yesterday is the healthy state — a check that warned on it would warn
+  // every day of its life and be muted within a week.
+  it("accepts yesterday as the newest bucket, and today when a backfill planted one", () => {
     const facts = healthy();
-    facts.usage.lastDate = "2026-08-14";
-    expect(check(facts, "usage.day").status).toBe("warn");
+    expect(check(facts, "usage.day").status).toBe("ok");
+    facts.usage.lastDate = "2026-08-15";
+    facts.usage.daily = withPartialToday(healthyDaily());
+    expect(check(facts, "usage.day").status).toBe("ok");
+  });
+
+  it("warns at two days behind and fails at three", () => {
+    const facts = healthy();
     facts.usage.lastDate = "2026-08-13";
+    expect(check(facts, "usage.day").status).toBe("warn");
+    facts.usage.lastDate = "2026-08-12";
     expect(check(facts, "usage.day").status).toBe("fail");
   });
 
@@ -225,61 +243,64 @@ describe("the usage series", () => {
   });
 });
 
+/** Rewrite whichever day the checks will judge, so the fixture shape can move. */
+function setJudgedDay(facts: MonitorFacts, tokens: number | null, spendUsd: number | null): string {
+  const judged = lastClosedDay(facts.usage.daily, "2026-08-15");
+  if (!judged) throw new Error("no closed day to rewrite");
+  const idx = facts.usage.daily.findIndex((d) => d.date === judged.day.date);
+  facts.usage.daily[idx] = { date: judged.day.date, tokens, spendUsd };
+  return judged.day.date;
+}
+
 describe("a day that is captured, but not whole", () => {
   // Freshness cannot see this: the row is there, written minutes ago, and holds
   // half a day of traffic.
-  it("fails when yesterday came in at a third of the week", () => {
+  it("fails when the last closed day came in at a third of the week", () => {
     const facts = healthy();
-    facts.usage.daily[facts.usage.daily.length - 2] = {
-      date: "2026-08-14",
-      tokens: 3_000_000_000_000,
-      spendUsd: 1_000_000,
-    };
+    expect(setJudgedDay(facts, 3_000_000_000_000, 1_000_000)).toBe("2026-08-14");
     expect(check(facts, "usage.tokens").status).toBe("fail");
     expect(check(facts, "usage.spend").status).toBe("fail");
   });
 
   it("shrugs at a weekend — 20% below the week in tokens is the market, not a fault", () => {
     const facts = healthy();
-    facts.usage.daily[facts.usage.daily.length - 2] = {
-      date: "2026-08-14",
-      tokens: 8_000_000_000_000,
-      spendUsd: 2_400_000,
-    };
+    setJudgedDay(facts, 8_000_000_000_000, 2_400_000);
     expect(check(facts, "usage.tokens").status).toBe("ok");
     expect(check(facts, "usage.spend").status).toBe("ok");
   });
 
   it("fails a day that doubled — the endpoint double-count looked exactly like this", () => {
     const facts = healthy();
-    facts.usage.daily[facts.usage.daily.length - 2] = {
-      date: "2026-08-14",
-      tokens: 32_000_000_000_000,
-      spendUsd: 16_000_000,
-    };
+    setJudgedDay(facts, 32_000_000_000_000, 16_000_000);
     expect(check(facts, "usage.tokens").status).toBe("fail");
     expect(check(facts, "usage.spend").status).toBe("fail");
   });
 
   it("fails when a day carries tokens but no dollars at all", () => {
     const facts = healthy();
-    facts.usage.daily[facts.usage.daily.length - 2] = {
-      date: "2026-08-14",
-      tokens: 10_000_000_000_000,
-      spendUsd: null,
-    };
+    setJudgedDay(facts, 10_000_000_000_000, null);
     expect(check(facts, "usage.tokens").status).toBe("ok");
     expect(check(facts, "usage.spend").status).toBe("fail");
   });
 
-  it("never judges the current day, which is always partial", () => {
+  it("judges yesterday when the feed has published it and nothing else", () => {
     const facts = healthy();
-    const judged = lastClosedDay(facts.usage.daily);
+    const judged = lastClosedDay(facts.usage.daily, "2026-08-15");
     expect(judged?.day.date).toBe("2026-08-14");
     expect(judged?.baseline).toHaveLength(7);
-    // Today's half-day is in the series and must not have been picked.
+  });
+
+  it("skips a partial current day a mid-day backfill planted", () => {
+    const facts = healthy();
+    facts.usage.lastDate = "2026-08-15";
+    facts.usage.daily = withPartialToday(healthyDaily());
+    const judged = lastClosedDay(facts.usage.daily, "2026-08-15");
+    // Half a day sits at the end of the series and must not be the one judged —
+    // 5.6T against a 10T week would fail, every time a repair run happened.
     expect(facts.usage.daily[facts.usage.daily.length - 1]!.date).toBe("2026-08-15");
+    expect(judged?.day.date).toBe("2026-08-14");
     expect(check(facts, "usage.tokens").status).toBe("ok");
+    expect(overallStatus(evaluateChecks(facts))).toBe("ok");
   });
 
   it("skips rather than guesses on a young deployment", () => {

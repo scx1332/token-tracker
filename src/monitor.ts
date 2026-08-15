@@ -185,7 +185,7 @@ export function evaluateChecks(facts: MonitorFacts): Check[] {
     usageDay(facts, now),
     usageGaps(facts),
     usageFloor(facts),
-    ...usageVolume(facts),
+    ...usageVolume(facts, now),
     fresh("usage.providers", facts.latest.usageProvider, now, STALENESS.daily!, "per-provider usage row"),
     fresh("prices.effective", facts.latest.effectivePrice, now, STALENESS.daily!, "effective-price row"),
     fresh("prices.changes", facts.latest.priceChange, now, STALENESS.priceChange!, "price change"),
@@ -301,18 +301,22 @@ function catalogSize(facts: MonitorFacts): Check {
 /**
  * The newest bucket_date, which is a different question from whether rows are
  * being written: rows can keep landing with stale dates if OpenRouter's own
- * pipeline stalls, or if our date handling breaks. The feed carries a partial
- * bucket for the current UTC day, so "today" is the norm and yesterday is
- * already a missed day.
+ * pipeline stalls, or if our date handling breaks.
+ *
+ * **Yesterday is the healthy answer, not today.** `rankings/models?view=day`
+ * serves exactly one date — the day that has ended — and flips to the next one
+ * within an hour of UTC midnight, so a model-level row for the current day only
+ * exists when a mid-day `bun run backfill` has planted a partial one from
+ * provider-token-chart. Two days behind means the flip was missed entirely.
  */
 function usageDay(facts: MonitorFacts, now: number): Check {
   const name = "usage.day";
   const last = facts.usage.lastDate;
   if (!last) return { name, status: "fail", detail: "usage_snapshots holds no model-level rows at all" };
   const behind = dayIndex(utcDate(now)) - dayIndex(last);
-  const detail = `newest usage bucket is ${last}, ${behind} day(s) behind ${utcDate(now)}`;
-  if (behind >= 2) return { name, status: "fail", detail };
-  if (behind >= 1) return { name, status: "warn", detail };
+  const detail = `newest usage bucket is ${last}, ${behind} day(s) behind ${utcDate(now)} (1 is normal — the feed publishes a day once it has ended)`;
+  if (behind >= 3) return { name, status: "fail", detail };
+  if (behind >= 2) return { name, status: "warn", detail };
   return { name, status: "ok", detail };
 }
 
@@ -360,8 +364,8 @@ function usageFloor(facts: MonitorFacts): Check {
  * capture that dies halfway through a day still writes a perfectly fresh row
  * holding half a day's traffic, and nothing else here would notice.
  */
-function usageVolume(facts: MonitorFacts): Check[] {
-  const judged = lastClosedDay(facts.usage.daily);
+function usageVolume(facts: MonitorFacts, now: number): Check[] {
+  const judged = lastClosedDay(facts.usage.daily, utcDate(now));
   if (!judged) {
     const detail = `need ${BASELINE_DAYS} days of history plus a closed day to judge against; have ${facts.usage.daily.length}`;
     return [
@@ -377,13 +381,19 @@ function usageVolume(facts: MonitorFacts): Check[] {
 }
 
 /**
- * The newest bucket is the current UTC day and still filling, so it is never
- * the one to judge — the day before it is. Positional rather than by date on
- * purpose: `usage.gaps` owns holes, and this stays right even while a hole
- * exists somewhere behind it.
+ * The newest day that has ended. Usually that is the newest bucket outright,
+ * because the feed only publishes closed days — but a mid-day `bun run
+ * backfill` plants a partial current day from provider-token-chart, and judging
+ * half a day against seven whole ones would fail every time it happened.
  */
-export function lastClosedDay(daily: UsageDay[]): { day: UsageDay; baseline: UsageDay[] } | null {
-  const idx = daily.length - 2;
+export function lastClosedDay(daily: UsageDay[], todayUtc: string): { day: UsageDay; baseline: UsageDay[] } | null {
+  let idx = -1;
+  for (let i = daily.length - 1; i >= 0; i -= 1) {
+    if (daily[i]!.date < todayUtc) {
+      idx = i;
+      break;
+    }
+  }
   if (idx < 1) return null;
   const day = daily[idx]!;
   const baseline = daily.slice(Math.max(0, idx - BASELINE_DAYS), idx);
