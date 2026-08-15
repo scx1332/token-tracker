@@ -1,0 +1,178 @@
+# A backup nobody has restored is a hope, not a backup. This job takes the
+# newest archive off the live host, restores it into an empty Postgres, boots
+# the real backend against it, and only if all of that works does it keep the
+# copy — as a private GHCR package, newest three retained.
+name: Backup — verify and store
+
+on:
+  schedule:
+    # 04:00 UTC. The host dumps at 03:30 local (01:30 UTC), so this always
+    # collects a finished archive rather than one being written.
+    - cron: "0 4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: backup-verify
+  cancel-in-progress: false
+
+env:
+  IMAGE: ghcr.io/${{ github.repository_owner }}/token-tracker-backup
+  KEEP_VERSIONS: "3"
+
+jobs:
+  verify-and-store:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch the newest archive from the live host
+        run: |
+          set -euo pipefail
+          curl -fsS --retry 3 --retry-delay 5 --max-time 300 \
+            -H "Authorization: Bearer ${{ secrets.BACKUP_TOKEN }}" \
+            -D headers.txt -o backup.7z "${{ secrets.BACKUP_URL }}"
+
+          name=$(grep -i '^x-backup-name:' headers.txt | tr -d '\r' | awk '{print $2}')
+          want=$(grep -i '^x-backup-sha256:' headers.txt | tr -d '\r' | awk '{print $2}')
+          got=$(sha256sum backup.7z | cut -d' ' -f1)
+          [ -n "$name" ] || { echo "::error::server sent no X-Backup-Name"; exit 1; }
+          # Catches a transfer that ended early — curl -f alone would not.
+          [ "$want" = "$got" ] || { echo "::error::sha256 mismatch: sent $want, got $got"; exit 1; }
+
+          echo "BACKUP_NAME=$name" >>"$GITHUB_ENV"
+          echo "BACKUP_DATE=$(echo "$name" | sed -E 's/^tokens-(.+)\.sql\.7z$/\1/')" >>"$GITHUB_ENV"
+          echo "$name — $(numfmt --to=iec $(stat -c%s backup.7z)), sha256 verified" >>"$GITHUB_STEP_SUMMARY"
+
+      - name: Unpack and check the dump is complete
+        run: |
+          set -euo pipefail
+          7z x -y backup.7z >/dev/null
+          sql=$(ls tokens-*.sql)
+          echo "SQL_FILE=$sql" >>"$GITHUB_ENV"
+          # pg_dump writes this only after a clean finish.
+          grep -q '^-- PostgreSQL database dump complete' "$sql" \
+            || { echo "::error::dump has no completion marker"; exit 1; }
+          echo "unpacked $sql — $(numfmt --to=iec $(stat -c%s "$sql"))" >>"$GITHUB_STEP_SUMMARY"
+
+      - name: Restore into an empty database
+        env:
+          # Keep the compose bind mount inside the workspace; on the live host
+          # this points at the real backup directory.
+          BACKUP_DIR_HOST: ${{ github.workspace }}/ci-backups
+        run: |
+          set -euo pipefail
+          mkdir -p ci-backups
+          # postgres only. Starting `ingest` here would scrape OpenRouter and
+          # write to the very data we are trying to verify.
+          docker compose up -d postgres
+          for i in $(seq 60); do
+            docker compose exec -T postgres pg_isready -U tokens -d tokens >/dev/null 2>&1 && break
+            sleep 2
+          done
+          docker compose exec -T postgres psql -U tokens -d tokens -v ON_ERROR_STOP=1 -q <"$SQL_FILE"
+
+      - name: Verify the restored data
+        env:
+          BACKUP_DIR_HOST: ${{ github.workspace }}/ci-backups
+        run: |
+          set -euo pipefail
+          docker compose exec -T postgres psql -U tokens -d tokens -v ON_ERROR_STOP=1 \
+            -f - <scripts/verify-restore.sql 2>&1 | tee verify.log
+          # psql returns 0 on a RAISE WARNING, which is what staleness uses.
+          if grep -q '^psql.*WARNING:' verify.log; then
+            echo "::warning::$(grep -m1 'WARNING:' verify.log)"
+          fi
+          { echo '### Restored database'; echo '```'; grep 'NOTICE:' verify.log | sed 's/^psql[^ ]* NOTICE: *//'; echo '```'; } >>"$GITHUB_STEP_SUMMARY"
+
+      - name: Boot the backend against the restored data
+        env:
+          BACKUP_DIR_HOST: ${{ github.workspace }}/ci-backups
+        run: |
+          set -euo pipefail
+          docker compose up -d --build backend
+          for i in $(seq 60); do
+            curl -fsS http://127.0.0.1:28470/health >/dev/null 2>&1 && break
+            sleep 2
+          done
+
+          fail=0
+          check() { # name, url, jq filter
+            if out=$(curl -fsS "$2" | jq -e "$3" 2>&1); then
+              echo "  ok    $1 — $out"
+            else
+              echo "::error::$1 failed its check ($3)"; fail=1
+            fi
+          }
+          check "health"           "http://127.0.0.1:28470/health"           '.ok == true'
+          check "market series"    "http://127.0.0.1:28470/market"           '.series | length > 30'
+          check "market spend"     "http://127.0.0.1:28470/market"           '[.series[].totalSpendUsd // 0] | add > 0'
+          check "top models"       "http://127.0.0.1:28470/market"           '.topModels | length > 0'
+          check "provider revenue" "http://127.0.0.1:28470/providers/market" '.series | length > 0'
+          check "model catalog"    "http://127.0.0.1:28470/models"           '.count > 100'
+          exit $fail
+
+      - name: Collect logs if anything failed
+        if: failure()
+        env:
+          BACKUP_DIR_HOST: ${{ github.workspace }}/ci-backups
+        run: docker compose logs --tail=80 postgres backend || true
+
+      - name: Store the verified archive
+        run: |
+          set -euo pipefail
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+
+          # A one-file image, so recovering it needs nothing but docker:
+          #   docker run --rm IMAGE:latest > tokens.sql.7z
+          mkdir -p pkg && cp backup.7z "pkg/$BACKUP_NAME"
+          cat >pkg/Dockerfile <<EOF
+          FROM alpine:3
+          COPY $BACKUP_NAME /backup.sql.7z
+          ENTRYPOINT ["cat", "/backup.sql.7z"]
+          EOF
+
+          docker build -t "$IMAGE:$BACKUP_DATE" -t "$IMAGE:latest" \
+            --label "org.opencontainers.image.source=https://github.com/${{ github.repository }}" \
+            --label "org.opencontainers.image.description=Verified nightly SQL backup ($BACKUP_NAME), restored and smoke-tested by ${{ github.workflow }}" \
+            --label "org.opencontainers.image.created=${{ github.event.repository.updated_at }}" \
+            pkg
+          docker push "$IMAGE:$BACKUP_DATE"
+          docker push "$IMAGE:latest"
+          echo "stored \`$IMAGE:$BACKUP_DATE\`" >>"$GITHUB_STEP_SUMMARY"
+
+      - name: Keep only the newest ${{ env.KEEP_VERSIONS }} versions
+        # Housekeeping must never fail a run that produced a good backup. The
+        # default GITHUB_TOKEN cannot always delete user-scoped package
+        # versions; set GHCR_CLEANUP_TOKEN (a PAT with delete:packages) if this
+        # step reports 403.
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GHCR_CLEANUP_TOKEN || secrets.GITHUB_TOKEN }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          set -euo pipefail
+          api="/users/$OWNER/packages/container/token-tracker-backup/versions"
+          gh api "$api" --paginate >versions.json
+
+          # Newest first, keep the first N, delete the rest — then drop anything
+          # still tagged :latest from the kill list, so the tag people restore
+          # from survives even if the ordering ever surprises us. Today's push
+          # tags one manifest both :latest and :DATE, so that is one version,
+          # not two.
+          jq -r --argjson keep "$KEEP_VERSIONS" '
+            sort_by(.created_at) | reverse | .[$keep:]
+            | map(select(.metadata.container.tags | index("latest") | not))
+            | .[] | "\(.id) \(.metadata.container.tags | if length == 0 then "untagged" else join(",") end)"
+          ' versions.json >stale.txt
+
+          if [ ! -s stale.txt ]; then echo "nothing to prune"; exit 0; fi
+          while read -r id tags; do
+            echo "deleting version $id ($tags)"
+            gh api -X DELETE "$api/$id"
+          done <stale.txt

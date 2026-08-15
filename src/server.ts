@@ -5,6 +5,9 @@ import { ACCELERATORS } from "./accelerators";
 import { buildRateByPermaslug } from "./market";
 import { fetchJson } from "./scraper";
 import { parseEndpointStats } from "./usage";
+import { bearerToken, pickLatestBackup, secretEquals } from "./backup";
+import { readdir } from "node:fs/promises";
+import { createHash } from "node:crypto";
 
 export interface ServerOptions {
   port: number;
@@ -48,6 +51,12 @@ function limitFromParams(params: URLSearchParams, def: number, max: number): num
 
 const OPENROUTER_BASE = process.env.OPENROUTER_BASE_URL ?? "https://openrouter.ai";
 const VOLUME_CACHE_MS = 10 * 60_000;
+
+// Where `scripts/backup-db.sh` drops archives, mounted read-only into this
+// container. The endpoint that serves them stays off — 404, as if it were never
+// routed — unless BACKUP_TOKEN is set, so it exists only where it is wanted.
+const BACKUP_DIR = process.env.BACKUP_DIR ?? "/backups";
+const BACKUP_TOKEN = process.env.BACKUP_TOKEN ?? "";
 
 export function createServer(storage: Storage, options: ServerOptions) {
   const build = readBuildInfo();
@@ -113,9 +122,45 @@ export function createServer(storage: Storage, options: ServerOptions) {
         return handleKvJson("apps_ranking", { day: [], week: [], month: [] });
       case "/usage/weekly":
         return handleKvJson("weekly_chart", { points: [] });
+      case "/backup/latest":
+        return handleBackupLatest(req);
       default:
         return json({ error: `Not found: ${path}` }, 404);
     }
+  }
+
+  /**
+   * The newest database backup, for the GitHub Action that verifies it by
+   * restoring it into a clean stack. Bearer-token gated; the token buys nothing
+   * else, and the archive holds only public market data (no keys are stored in
+   * the database), so a leak costs a dataset, not an account.
+   */
+  async function handleBackupLatest(req: Request): Promise<Response> {
+    if (!BACKUP_TOKEN) return json({ error: "Not found: /backup/latest" }, 404);
+    if (!secretEquals(bearerToken(req.headers.get("authorization")), BACKUP_TOKEN)) {
+      return json({ error: "Unauthorized" }, 401);
+    }
+
+    const names = await readdir(BACKUP_DIR).catch(() => null);
+    if (!names) return json({ error: "Backup directory is not mounted" }, 503);
+    const name = pickLatestBackup(names);
+    if (!name) return json({ error: "No backup archive yet" }, 503);
+
+    const file = Bun.file(`${BACKUP_DIR}/${name}`);
+    const bytes = Buffer.from(await file.arrayBuffer());
+    // The caller re-checks this after download, so a truncated transfer is
+    // caught before anything downstream trusts the archive.
+    const sha256 = createHash("sha256").update(bytes).digest("hex");
+    return new Response(bytes, {
+      headers: {
+        "Content-Type": "application/x-7z-compressed",
+        "Content-Length": String(bytes.length),
+        "Content-Disposition": `attachment; filename="${name}"`,
+        "X-Backup-Name": name,
+        "X-Backup-Sha256": sha256,
+        "Cache-Control": "no-store",
+      },
+    });
   }
 
   async function handleHealth(): Promise<Response> {

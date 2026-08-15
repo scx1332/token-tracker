@@ -56,6 +56,11 @@ services:
       DATABASE_URL: postgres://${POSTGRES_USER:-tokens}:${POSTGRES_PASSWORD:-tokens}@postgres:5432/${POSTGRES_DB:-tokens}
       SERVER_PORT: 3000
       SERVER_HOSTNAME: 0.0.0.0
+      # /backup/latest stays 404 unless a token is set (see .env.example).
+      BACKUP_DIR: /backups
+      BACKUP_TOKEN: ${BACKUP_TOKEN:-}
+    volumes:
+      - ${BACKUP_DIR_HOST:-/home/ubuntu/backups/token-tracker}:/backups:ro
     ports:
       - "127.0.0.1:${BACKEND_PORT:-28470}:3000"
     command: ["bun", "run", "serve"]
