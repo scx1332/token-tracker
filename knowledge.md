@@ -7,6 +7,10 @@ file holds the ones about the *data*.
 
 Last verified against the live database on **2026-08-15**.
 
+Editing this file commits and pushes it automatically — a `PostToolUse` hook in
+`.claude/settings.json` watches for writes to `knowledge.md`. Keep it current
+whenever a data fact changes; there is no separate step to remember.
+
 ---
 
 ## 1. Coverage at a glance
