@@ -286,7 +286,7 @@ async function ingestAppSpend(deps: IngestDeps): Promise<object | null> {
     const rate = effectiveRate(m);
     if (rate === null) continue;
     const variant = m.variant ?? "standard";
-    const key = `${m.permaslug} ${variant}`;
+    const key = `${m.permaslug} ${variant}`;
     if (seen.has(key)) continue;
     seen.add(key);
     targets.push({ modelId: m.modelId, permaslug: m.permaslug, variant, rate });
