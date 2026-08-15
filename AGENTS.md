@@ -43,6 +43,16 @@ docker compose up -d --build                    # full stack (or ./deploy.sh)
   latest complete day). `view=week`/`month` add only a sparse tail — do not treat
   them as time series. Deep per‑model history comes from `provider-token-chart`
   (summed across providers) in the backfill.
+- **`effective-pricing` is endpoint‑level; usage rows are provider‑level.** One
+  slug appears several times in `providerSummaries` (regions/quantizations —
+  "Google Vertex" and "Google Vertex (US)" are both `google-vertex`), each with
+  its own rates and volume. `collapseProviderEndpoints` (src/usage.ts) blends
+  them volume‑weighted into one row per slug before anything is stored or
+  fetched. Iterating `eff.providers` directly is how a 444M‑token side endpoint
+  at $0.82/Mtok came to price the 389B tokens that ran at $0.20 (+17% on the
+  whole revenue tape, since usage rows are keyed by slug and the last write
+  won), and how the backfill fetched *and summed* one provider‑token‑chart
+  twice (Anthropic model history ran 2–2.5× high). Do not undo the collapse.
 - **Schema creation is serialized** by a per‑schema Postgres advisory lock
   (`initSchema`), because `ingest` and `backend` boot together and racing
   `CREATE TABLE IF NOT EXISTS` trips `pg_type_typname_nsp_index`.

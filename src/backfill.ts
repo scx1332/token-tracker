@@ -9,7 +9,7 @@
 import { parseIngestConfig, HelpRequested, type IngestConfig } from "./config";
 import { OpenRouterClient, modelVariant } from "./openrouter";
 import { Storage, type UsageUpsert } from "./storage";
-import { fetchEffectivePricing, fetchProviderTokenChart, fetchWeeklyChart } from "./usage";
+import { fetchEffectivePricing, fetchProviderTokenChart, fetchWeeklyChart, collapseProviderEndpoints } from "./usage";
 import { estimateSpendUsd } from "./pricing";
 import { isFrontier } from "./frontier";
 import { mapPool } from "./concurrency";
@@ -61,8 +61,9 @@ export async function runBackfill(deps: BackfillDeps): Promise<BackfillResult> {
       const variant = modelVariant(model.modelId) ?? "standard";
       const permaslug = model.permaslug!;
       const eff = await fetchEffectivePricing(client, permaslug, variant, signal);
-      const providers = (eff?.providers ?? [])
-        .filter((p) => p.slug)
+      // Endpoints first, or a provider with two endpoints (Anthropic's Vertex
+      // and Bedrock regions) gets its token chart fetched — and summed — twice.
+      const providers = collapseProviderEndpoints((eff?.providers ?? []).filter((p) => p.slug))
         .sort((a, b) => (b.totalTokens ?? 0) - (a.totalTokens ?? 0))
         .slice(0, MAX_PROVIDERS_PER_MODEL);
 

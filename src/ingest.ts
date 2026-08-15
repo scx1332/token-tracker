@@ -16,6 +16,7 @@ import {
   fetchEndpointStats,
   fetchEffectivePricing,
   fetchProviderTokenChart,
+  collapseProviderEndpoints,
 } from "./usage";
 import { computeMarketAggregates, effectiveRate, aggregateAppSpend, type ModelTopApps } from "./market";
 import { mapPool } from "./concurrency";
@@ -410,11 +411,12 @@ async function ingestProviderUsage(deps: IngestDeps): Promise<void> {
         const eff = await fetchEffectivePricing(client, m.permaslug!, variant, signal);
         if (!eff) return null;
 
+        // Endpoints → providers before anything is stored: both tables below are
+        // keyed by slug, so a duplicate slug would otherwise overwrite itself.
+        const providerRates = collapseProviderEndpoints(eff.providers.filter((p) => p.slug));
         const effRows = [
           { provider: "", effInputPerMtok: eff.weightedInputPerMtok, effOutputPerMtok: eff.weightedOutputPerMtok, totalTokens: null },
-          ...eff.providers
-            .filter((p) => p.slug)
-            .map((p) => ({ provider: p.slug, effInputPerMtok: p.effInputPerMtok, effOutputPerMtok: p.effOutputPerMtok, totalTokens: p.totalTokens })),
+          ...providerRates.map((p) => ({ provider: p.slug, effInputPerMtok: p.effInputPerMtok, effOutputPerMtok: p.effOutputPerMtok, totalTokens: p.totalTokens })),
         ];
         await storage.insertEffectivePriceSnapshots(m.modelId, effRows, capturedAt);
         priceRows += effRows.length;
@@ -432,8 +434,7 @@ async function ingestProviderUsage(deps: IngestDeps): Promise<void> {
         // Per-provider daily tokens, priced at the provider's effective rates
         // blended by the model's own observed prompt/completion mix.
         const promptShare = (await storage.getObservedPromptShare(m.modelId)) ?? 0.9;
-        const providers = eff.providers
-          .filter((p) => p.slug)
+        const providers = [...providerRates]
           .sort((a, b) => (b.totalTokens ?? 0) - (a.totalTokens ?? 0))
           .slice(0, PROVIDER_USAGE_MAX_PROVIDERS);
         const perProvider = await mapPool(providers, 2, async (p) => {

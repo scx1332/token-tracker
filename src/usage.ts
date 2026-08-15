@@ -82,10 +82,87 @@ export async function fetchEndpointStats(
   return parseEndpointStats(raw);
 }
 
+export interface ProviderEffectivePrice {
+  slug: string;
+  name: string;
+  totalTokens: number | null;
+  effInputPerMtok: number | null;
+  effOutputPerMtok: number | null;
+}
+
 export interface EffectivePricing {
   weightedInputPerMtok: number | null;
   weightedOutputPerMtok: number | null;
-  providers: { slug: string; name: string; totalTokens: number | null; effInputPerMtok: number | null; effOutputPerMtok: number | null }[];
+  providers: ProviderEffectivePrice[];
+}
+
+/**
+ * `effective-pricing` reports ENDPOINTS, not providers: one slug can appear
+ * several times (regions, quantizations — "Google Vertex" and "Google Vertex
+ * (US)" are both `google-vertex`), each with its own rates and volume. Every
+ * consumer here is keyed by provider, so the endpoints must be collapsed
+ * first or a side endpoint speaks for the whole slug: 444M tokens quoted at
+ * $0.82/Mtok repricing the 389B tokens that really ran at $0.20.
+ *
+ * Rates blend volume-weighted — OpenRouter's own convention, its model-level
+ * `weightedInputPrice` is exactly this blend across the endpoints — falling
+ * back to a plain mean when no endpoint reports volume. Tokens sum; the
+ * busiest endpoint's display name wins; first-seen order is kept.
+ */
+export function collapseProviderEndpoints(endpoints: ProviderEffectivePrice[]): ProviderEffectivePrice[] {
+  type Acc = {
+    row: ProviderEffectivePrice;
+    nameTokens: number;
+    tokens: number | null;
+    input: { weighted: number; weight: number; flat: number[] };
+    output: { weighted: number; weight: number; flat: number[] };
+  };
+  const bySlug = new Map<string, Acc>();
+
+  for (const ep of endpoints) {
+    const tokens = ep.totalTokens ?? 0;
+    let acc = bySlug.get(ep.slug);
+    if (!acc) {
+      acc = {
+        row: { slug: ep.slug, name: ep.name, totalTokens: null, effInputPerMtok: null, effOutputPerMtok: null },
+        nameTokens: -1,
+        tokens: null,
+        input: { weighted: 0, weight: 0, flat: [] },
+        output: { weighted: 0, weight: 0, flat: [] },
+      };
+      bySlug.set(ep.slug, acc);
+    }
+    if (tokens > acc.nameTokens) {
+      acc.row.name = ep.name;
+      acc.nameTokens = tokens;
+    }
+    if (ep.totalTokens !== null) acc.tokens = (acc.tokens ?? 0) + ep.totalTokens;
+    // Input and output blend independently — one can be quoted without the other.
+    for (const [rate, side] of [
+      [ep.effInputPerMtok, acc.input],
+      [ep.effOutputPerMtok, acc.output],
+    ] as const) {
+      if (rate === null) continue;
+      side.flat.push(rate);
+      if (tokens > 0) {
+        side.weighted += rate * tokens;
+        side.weight += tokens;
+      }
+    }
+  }
+
+  const blend = (side: Acc["input"]): number | null => {
+    if (side.weight > 0) return side.weighted / side.weight;
+    if (side.flat.length === 0) return null;
+    return side.flat.reduce((a, b) => a + b, 0) / side.flat.length;
+  };
+
+  return [...bySlug.values()].map((acc) => ({
+    ...acc.row,
+    totalTokens: acc.tokens,
+    effInputPerMtok: blend(acc.input),
+    effOutputPerMtok: blend(acc.output),
+  }));
 }
 
 function toDate(value: unknown): string {
