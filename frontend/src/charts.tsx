@@ -895,7 +895,9 @@ export function PriceHistoryChart({ rows, height = 300 }: { rows: PriceHistoryRo
     ];
   }, [rows]);
 
-  const layout = baseLayout({ height, yaxis: { gridcolor: C.grid, showgrid: true, zeroline: false, tickprefix: "$", tickfont: { family: FONT, color: C.tick, size: 10 } } });
+  // Anchored at $0: prices are ratios to zero, and a cropped axis turns a
+  // stable price into what looks like wild swings.
+  const layout = baseLayout({ height, yaxis: { gridcolor: C.grid, showgrid: true, zeroline: false, rangemode: "tozero", tickprefix: "$", tickfont: { family: FONT, color: C.tick, size: 10 } } });
   return <Plot data={data} layout={layout} config={baseConfig} className="plot" style={{ width: "100%", height }} useResizeHandler />;
 }
 
