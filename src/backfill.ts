@@ -53,6 +53,10 @@ export async function runBackfill(deps: BackfillDeps): Promise<BackfillResult> {
   const byUsage = [...models].sort((a, b) => (b.latestTokens ?? 0) - (a.latestTokens ?? 0));
   const targetIds = new Set<string>(byUsage.slice(0, MAX_TARGETS).map((m) => m.modelId));
   for (const m of models) if (isFrontier(m.modelId)) targetIds.add(m.modelId);
+  // Everything this source already wrote, however quiet the model has since
+  // become: a refresh that only visits today's busiest models leaves its own
+  // older mistakes in place (5.8% of the history, after the first repair run).
+  for (const id of await storage.getModelIdsBySource("provider-token-chart")) targetIds.add(id);
   const targets = models.filter((m) => targetIds.has(m.modelId) && m.permaslug);
   const cutoff = daysAgoDate(config.backfillDays);
   log(`backfilling up to ${config.backfillDays}d for ${targets.length} models`);

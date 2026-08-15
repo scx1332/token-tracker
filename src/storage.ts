@@ -725,6 +725,19 @@ export class Storage {
    * (real paid rates embed cache discounts; list prices overstate spend on
    * cache-heavy models). Rows without a prompt/completion split blend 90/10.
    */
+  /**
+   * Model ids whose model-level rows a given source wrote — the set a refresh
+   * pass must cover if it is to reach all of its own history, not just the
+   * models that happen to be busy today.
+   */
+  async getModelIdsBySource(source: string): Promise<string[]> {
+    const res = await this.pool.query(
+      `SELECT DISTINCT model_id FROM ${this.t("usage_snapshots")} WHERE provider = '' AND source = $1`,
+      [source],
+    );
+    return res.rows.map((row) => row.model_id as string);
+  }
+
   /** Observed prompt-token share for a model (from rows with a known split), or null. */
   async getObservedPromptShare(modelId: string): Promise<number | null> {
     const mix = await this.pool.query(
