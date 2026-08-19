@@ -6,6 +6,7 @@ import { SpendTokensChart, PriceIndexChart, WeeklyBarsChart, WeeklyRaceChart, Co
 import { usd, usdExact, compact, mtok, relTime, seriesChange, displayName, pct, shortDate } from "../format";
 import { forecastCurrentWeek, toWeeklyBuckets, trimLeadingPartial } from "../weekly";
 import { closedOnly, isClosedDay } from "../runningDay";
+import { rankAppsByDaySpend } from "../apps";
 import { buildComparison } from "../gpu";
 import type { GpuDailyRow } from "../api";
 
@@ -20,6 +21,8 @@ export function MarketView({ navigate }: { navigate: (to: string) => void }) {
   const [raceMode, setRaceMode] = useState<"spend" | "tokens">("spend");
   const [weekMode, setWeekMode] = useState<"spend" | "tokens" | "both">("both");
   const [indexMode, setIndexMode] = useState<"price" | "compute">("price");
+  // Apps default to the same day the model leaderboard shows, not the month.
+  const [appsMode, setAppsMode] = useState<"day" | "month">("day");
   // Free-tier traffic is volume without a market: default it out of token stats.
   const [includeFree, setIncludeFree] = useState(false);
   const [gpuDaily, setGpuDaily] = useState<GpuDailyRow[]>([]);
@@ -143,7 +146,7 @@ export function MarketView({ navigate }: { navigate: (to: string) => void }) {
   // publishes no direct per-app dollars); fall back to token ranking until
   // the first ingest sweep lands.
   const spendApps = market.appsSpend?.apps ?? [];
-  const appItems: RankItem[] = spendApps.length
+  const monthAppItems: RankItem[] = spendApps.length
     ? spendApps.slice(0, 15).map((a) => {
         const max = spendApps[0]?.spendUsd ?? 1;
         return {
@@ -161,9 +164,32 @@ export function MarketView({ navigate }: { navigate: (to: string) => void }) {
         frac: (a.tokens ?? 0) / ((list[0]?.tokens ?? 1) || 1),
         color: C.gold,
       }));
-  const appsNote = spendApps.length
+  const monthAppsNote = spendApps.length
     ? `by est. spend — app tokens priced per model, top ${market.appsSpend?.modelsSwept ?? 0} paid models`
     : "by tokens routed — spend estimate builds after next sync";
+
+  // Day view: the apps feed ships tokens only, so each app's day tokens are
+  // priced with its own blended rate from the monthly sweep — see apps.ts.
+  const dayApps = rankAppsByDaySpend(market.apps.day, spendApps);
+  const dayAppsPriced = dayApps.some((a) => a.spendUsd !== null);
+  const dayAppItems: RankItem[] = dayApps.slice(0, 15).map((a, _i, list) => {
+    const max = dayAppsPriced ? list[0]?.spendUsd ?? 1 : list[0]?.tokens ?? 1;
+    const value = dayAppsPriced ? a.spendUsd ?? 0 : a.tokens;
+    return {
+      name: a.rateSource === "market" ? `${a.title} *` : a.title,
+      value,
+      valueLabel: dayAppsPriced ? `${usd(a.spendUsd)} · ${compact(a.tokens)} tok` : `${compact(a.tokens)} tok`,
+      frac: value / (max || 1),
+      color: C.gold,
+    };
+  });
+  const guessedRates = dayApps.slice(0, 15).filter((a) => a.rateSource === "market").length;
+  const dayAppsNote = dayAppsPriced
+    ? `est. spend — day tokens × each app's 30-day rate${guessedRates ? ` · * = fleet-average rate (${guessedRates})` : ""}`
+    : "by tokens routed — spend estimate builds after next sync";
+
+  const appItems = appsMode === "day" ? dayAppItems : monthAppItems;
+  const appsNote = appsMode === "day" ? dayAppsNote : monthAppsNote;
 
   // "Crash radar": is the usage-weighted price falling and spend still climbing?
   const priceFalling = priceIndexChange !== null && priceIndexChange < -0.01;
@@ -446,8 +472,27 @@ export function MarketView({ navigate }: { navigate: (to: string) => void }) {
         </Panel>
         <Panel className="panel-pad">
           <div className="chart-head">
-            <div className="chart-title">Top apps · 30 days</div>
-            <div className="chart-note">{appsNote}</div>
+            <div>
+              <div className="chart-title">Top apps · {appsMode === "day" ? "latest day" : "30 days"}</div>
+              <div className="chart-note">{appsNote}</div>
+            </div>
+            <div className="seg seg-sm">
+              <button
+                className={appsMode === "day" ? "active" : ""}
+                onClick={() => setAppsMode("day")}
+                disabled={!market.apps.day.length}
+                title={
+                  market.apps.day.length
+                    ? "The apps feed's latest full day — undated, but the same bucket the models list is dated by"
+                    : "No day bucket in the apps feed yet"
+                }
+              >
+                Day
+              </button>
+              <button className={appsMode === "month" ? "active" : ""} onClick={() => setAppsMode("month")}>
+                30 days
+              </button>
+            </div>
           </div>
           {appItems.length ? <RankList items={appItems} /> : <div className="empty">No app data.</div>}
         </Panel>
