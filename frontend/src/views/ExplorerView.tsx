@@ -97,8 +97,11 @@ export function ExplorerView({
         if (!alive) return;
         setPriceData(pp);
         setDetail(d);
-        // Drop pinned providers that don't serve this model.
-        setSelected((cur) => cur.filter((p) => pp.providers.includes(p)));
+        // Drop pinned lines that don't serve this model. Pins are endpoint
+        // labels, so they are matched against the points, not the response's
+        // provider-name list.
+        const served = new Set(distinctEndpoints(pp.points));
+        setSelected((cur) => cur.filter((p) => served.has(p)));
       })
       .catch((e) => alive && setError(String(e.message ?? e)))
       .finally(() => alive && setLoadingModel(false));
