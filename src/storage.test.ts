@@ -2,7 +2,7 @@ import { test, expect, describe, afterAll } from "bun:test";
 import { createIsolatedStorage, hasPostgresForTests, closeTestPools } from "./testPostgres";
 import { normalizePricing } from "./pricing";
 import { evaluateChecks } from "./monitor";
-import type { ModelUpsert } from "./storage";
+import { priceStateKey, type ModelUpsert } from "./storage";
 
 // Integration tests need a database. They self-skip unless TEST_DATABASE_URL
 // (or DATABASE_URL) is set, so plain `bun test` stays hermetic.
@@ -84,6 +84,60 @@ describe("Storage (integration)", () => {
       expect(providers).toHaveLength(1);
       expect(providers[0]!.provider).toBe("DeepInfra");
       expect(providers[0]!.quantization).toBe("fp8");
+    } finally {
+      await cleanup();
+    }
+  });
+
+  // The phantom-change bug: one provider serving a model from several endpoints
+  // at different prices (openai / openai/flex / openai/priority). Keyed by
+  // provider name the tiers overwrote each other's last-known price and every
+  // sweep logged three changes that never happened.
+  it("keeps one change-log slot per endpoint, not per provider", async () => {
+    const { storage, cleanup } = await createIsolatedStorage();
+    try {
+      await storage.upsertModel(sampleModel("openai/gpt-5.6-sol", "openai/gpt-5.6-sol-x"));
+      const std = normalizePricing({ prompt: "0.0000025", completion: "0.000015" });
+      const flex = normalizePricing({ prompt: "0.00000125", completion: "0.0000075" });
+      const prio = normalizePricing({ prompt: "0.000005", completion: "0.00003" });
+      const tiers = [
+        { tag: "openai", pricing: std },
+        { tag: "openai/flex", pricing: flex },
+        { tag: "openai/priority", pricing: prio },
+      ];
+      await storage.insertPricePoints(
+        tiers.map((t) => ({
+          modelId: "openai/gpt-5.6-sol",
+          provider: "OpenAI",
+          endpointTag: t.tag,
+          pricing: t.pricing,
+          contextLength: 1050000,
+          quantization: null,
+          isFree: false,
+        })),
+      );
+
+      // Each tier holds its own price, so a second identical sweep finds
+      // nothing changed and writes nothing.
+      const latest = await storage.getLatestPrices();
+      expect(latest.get(priceStateKey("openai/gpt-5.6-sol", "openai"))?.pricing.promptUsd).toBe(0.0000025);
+      expect(latest.get(priceStateKey("openai/gpt-5.6-sol", "openai/flex"))?.pricing.promptUsd).toBe(0.00000125);
+      expect(latest.get(priceStateKey("openai/gpt-5.6-sol", "openai/priority"))?.pricing.promptUsd).toBe(0.000005);
+
+      const history = await storage.getProviderPriceHistory("openai/gpt-5.6-sol");
+      expect(history).toHaveLength(3);
+      expect(history.map((r) => r.endpointTag).sort()).toEqual(["openai", "openai/flex", "openai/priority"]);
+
+      // The model page lists one row per provider, quoted at its base endpoint.
+      const providers = await storage.getLatestProviderPrices("openai/gpt-5.6-sol");
+      expect(providers).toHaveLength(1);
+      expect(providers[0]!.endpointTag).toBe("openai");
+      expect(providers[0]!.promptUsd).toBe(0.0000025);
+
+      // …and the provider rollup counts the model once, not once per tier.
+      const stats = await storage.getProviderStats();
+      const openai = stats.find((s) => s.provider === "OpenAI");
+      expect(openai?.modelCount).toBe(1);
     } finally {
       await cleanup();
     }

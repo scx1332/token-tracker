@@ -7,7 +7,7 @@ import {
   type UsageUpsert,
 } from "./storage";
 import { toModelUpsert, buildUsageIndex, resolveUsageModelId } from "./modelMap";
-import { normalizePricing, pricingChanged, isFreePricing, estimateSpendUsd } from "./pricing";
+import { normalizePricing, pricingChanged, isFreePricing, estimateSpendUsd, endpointTags } from "./pricing";
 import {
   fetchRankings,
   fetchWeeklyChart,
@@ -157,14 +157,23 @@ async function ingestProviderPrices(
       try {
         const resp = await client.getModelEndpoints(model.links?.details ?? model.id, signal);
         const endpoints = resp.data?.endpoints ?? [];
-        for (const endpoint of endpoints) {
+        const tags = endpointTags(endpoints);
+        for (const [i, endpoint] of endpoints.entries()) {
           const provider = endpoint.provider_name || endpoint.name || endpoint.tag || "unknown";
+          // One provider often serves the same model from several endpoints at
+          // different prices (openai/flex, openai/priority, azure/eu …). The
+          // change-log is per endpoint: keyed by provider name alone the tiers
+          // take turns overwriting each other and every sweep logs a change
+          // that never happened. `endpointTags` also splits OpenRouter's
+          // same-tag duplicates, which fail the same way.
+          const endpointTag = tags[i] ?? provider;
           const pricing = normalizePricing(endpoint.pricing);
-          const prev = latest.get(priceStateKey(model.id, provider))?.pricing ?? null;
+          const prev = latest.get(priceStateKey(model.id, endpointTag))?.pricing ?? null;
           if (pricingChanged(prev, pricing)) {
             points.push({
               modelId: model.id,
               provider,
+              endpointTag,
               pricing,
               contextLength: endpoint.context_length ?? null,
               quantization: endpoint.quantization ?? null,

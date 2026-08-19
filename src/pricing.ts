@@ -1,4 +1,4 @@
-import type { NormalizedPricing, OpenRouterPricing } from "./types";
+import type { NormalizedPricing, OpenRouterEndpoint, OpenRouterPricing } from "./types";
 
 /** Parse an OpenRouter price string (USD, per token/unit) into a float or null. */
 export function parseUsd(value: string | undefined | null): number | null {
@@ -97,4 +97,49 @@ export function blendedPricePerMtok(p: NormalizedPricing, promptShare = 0.9): nu
   if (p.promptUsd === null && p.completionUsd === null) return null;
   const blended = (p.promptUsd ?? 0) * promptShare + (p.completionUsd ?? 0) * (1 - promptShare);
   return blended * 1_000_000;
+}
+
+/**
+ * Stable identity for each endpoint in one model's endpoint list — the key the
+ * price change-log is written against.
+ *
+ * A provider can serve the same model several times over: OpenAI as `openai`,
+ * `openai/flex` and `openai/priority`, Azure per region. Those carry distinct
+ * tags. But OpenRouter also publishes genuine duplicates — two
+ * `google-vertex/us-south1` entries for qwen3-235b at different prices, alike
+ * in every other field — and a shared key makes the two take turns overwriting
+ * each other, one phantom "price change" per entry per sweep, forever.
+ *
+ * Duplicates are therefore ordered by price (cheapest keeps the bare tag, the
+ * rest get `#2`, `#3`) rather than by their position in the response: position
+ * is the one thing about a duplicate that nothing guarantees.
+ */
+export function endpointTags(endpoints: OpenRouterEndpoint[]): string[] {
+  const fallback = (e: OpenRouterEndpoint) => e.tag || e.provider_name || e.name || "unknown";
+  const groups = new Map<string, number[]>();
+  endpoints.forEach((e, i) => {
+    const tag = fallback(e);
+    groups.set(tag, [...(groups.get(tag) ?? []), i]);
+  });
+
+  const tags: string[] = new Array(endpoints.length);
+  for (const [tag, idx] of groups) {
+    if (idx.length === 1) {
+      tags[idx[0]!] = tag;
+      continue;
+    }
+    const priceOf = (i: number) => {
+      const p = normalizePricing(endpoints[i]!.pricing);
+      return [p.promptUsd ?? Infinity, p.completionUsd ?? Infinity, endpoints[i]!.context_length ?? 0] as const;
+    };
+    const ordered = [...idx].sort((a, b) => {
+      const pa = priceOf(a);
+      const pb = priceOf(b);
+      return pa[0] - pb[0] || pa[1] - pb[1] || pa[2] - pb[2] || a - b;
+    });
+    ordered.forEach((i, rank) => {
+      tags[i] = rank === 0 ? tag : `${tag}#${rank + 1}`;
+    });
+  }
+  return tags;
 }

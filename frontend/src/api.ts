@@ -120,6 +120,8 @@ export interface MarketResponse {
 
 export interface PriceHistoryRow {
   provider: string;
+  /** Endpoint tag ("openai/flex", "azure/eu"); "" on older rows. */
+  endpointTag?: string;
   observedAt: string;
   promptUsd: number | null;
   completionUsd: number | null;

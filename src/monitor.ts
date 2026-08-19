@@ -132,12 +132,17 @@ export const STALENESS: Record<string, Limits> = {
   /** 15-minute clock, so an hour of silence is already four missed sweeps. */
   gpu: { warn: 0.75, fail: 1.5 },
   /**
-   * Prices are a change-log, so silence is legal in a way it is not elsewhere —
-   * but the live market has produced ~160 changes every single hour since
-   * launch, so a quiet quarter-day is already strange and a quiet day means the
-   * price parsing broke while the pass kept reporting success.
+   * Prices are a change-log, so silence is legal in a way it is not elsewhere.
+   * The old thresholds (6h / 24h) were calibrated against ~160 "changes" an
+   * hour — but that number was the phantom churn from keying the log by
+   * provider name, which logged one change per endpoint per sweep for every
+   * provider selling a model at more than one price. Keyed per endpoint the
+   * real market produces ~70 changes a day across ~1.1k endpoints, and its
+   * quietest observed stretch is 6h (p99 3h). So: warn at double the quietest
+   * stretch ever seen, fail when two days of total silence say the parsing
+   * broke while the pass kept reporting success.
    */
-  priceChange: { warn: 6, fail: 24 },
+  priceChange: { warn: 12, fail: 48 },
   /** 24h between cron runs, plus room for a slow dump. */
   backup: { warn: 26, fail: 30 },
 };

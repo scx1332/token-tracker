@@ -6,6 +6,7 @@ import {
   isFreePricing,
   estimateSpendUsd,
   blendedPricePerMtok,
+  endpointTags,
 } from "./pricing";
 
 describe("parseUsd", () => {
@@ -95,5 +96,41 @@ describe("blendedPricePerMtok", () => {
   });
   test("null when unpriced", () => {
     expect(blendedPricePerMtok(normalizePricing({}))).toBeNull();
+  });
+});
+
+describe("endpointTags", () => {
+  const ep = (tag: string, prompt: string, completion = "0.00001") => ({
+    tag,
+    provider_name: "Whoever",
+    pricing: { prompt, completion },
+  });
+
+  test("passes distinct tags straight through", () => {
+    expect(endpointTags([ep("openai", "0.0000025"), ep("openai/flex", "0.00000125")])).toEqual([
+      "openai",
+      "openai/flex",
+    ]);
+  });
+
+  test("splits same-tag duplicates by price, cheapest keeping the bare tag", () => {
+    // OpenRouter really does publish two `google-vertex/us-south1` entries for
+    // qwen3-235b, identical but for the price.
+    const tags = endpointTags([
+      ep("google-vertex/us-south1", "0.00000025"),
+      ep("google-vertex/us-south1", "0.00000022"),
+    ]);
+    expect(tags).toEqual(["google-vertex/us-south1#2", "google-vertex/us-south1"]);
+  });
+
+  test("is independent of the order the duplicates arrive in", () => {
+    const a = endpointTags([ep("x", "0.000002"), ep("x", "0.000001"), ep("x", "0.000003")]);
+    const b = endpointTags([ep("x", "0.000003"), ep("x", "0.000002"), ep("x", "0.000001")]);
+    expect(a).toEqual(["x#2", "x", "x#3"]);
+    expect(b).toEqual(["x#3", "x#2", "x"]);
+  });
+
+  test("falls back to the provider name when an endpoint has no tag", () => {
+    expect(endpointTags([{ provider_name: "DeepInfra", pricing: { prompt: "0.000001" } }])).toEqual(["DeepInfra"]);
   });
 });

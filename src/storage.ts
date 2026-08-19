@@ -50,6 +50,8 @@ export interface ModelUpsert {
 export interface PricePointInsert {
   modelId: string;
   provider: string; // "" = model-level/default pricing
+  /** Endpoint tag ("openai/flex", "azure/eu"); "" for model-level rows. */
+  endpointTag?: string;
   pricing: NormalizedPricing;
   contextLength: number | null;
   quantization: string | null;
@@ -138,6 +140,8 @@ export interface ModelWithLatest extends StoredModel {
 
 export interface PriceHistoryRow {
   provider: string;
+  /** The endpoint this quote belongs to; "" on model-level rows. */
+  endpointTag: string;
   observedAt: string;
   promptUsd: number | null;
   completionUsd: number | null;
@@ -345,12 +349,33 @@ export class Storage {
         context_length BIGINT,
         quantization TEXT,
         is_free BOOLEAN NOT NULL DEFAULT FALSE,
+        endpoint_tag TEXT NOT NULL DEFAULT '',
         raw JSONB
       )
     `);
+    // One provider can serve the same model from several endpoints — OpenAI
+    // sells gpt-5.6-sol as `openai`, `openai/flex` and `openai/priority` at
+    // three different prices, Azure by region. The change-log is keyed by
+    // endpoint tag, not provider name: keyed by name the tiers overwrite each
+    // other's last-known price and every sweep records phantom changes.
+    await this.pool.query(
+      `ALTER TABLE ${this.t("price_points")} ADD COLUMN IF NOT EXISTS endpoint_tag TEXT NOT NULL DEFAULT ''`,
+    );
+    // Existing installs carry the tag inside `raw` — recover it there. Rows
+    // with no tag fall back to the provider name so they keep a distinct key
+    // from the model-level ('' provider) rows.
+    await this.pool.query(
+      `UPDATE ${this.t("price_points")}
+       SET endpoint_tag = COALESCE(NULLIF(raw->>'tag', ''), provider)
+       WHERE endpoint_tag = '' AND provider <> ''`,
+    );
     await this.pool.query(
       `CREATE INDEX IF NOT EXISTS ${quoteIdent("price_points_lookup_idx")}
        ON ${this.t("price_points")} (model_id, provider, observed_at DESC)`,
+    );
+    await this.pool.query(
+      `CREATE INDEX IF NOT EXISTS ${quoteIdent("price_points_endpoint_idx")}
+       ON ${this.t("price_points")} (model_id, endpoint_tag, observed_at DESC)`,
     );
     await this.pool.query(
       `CREATE INDEX IF NOT EXISTS ${quoteIdent("price_points_observed_idx")}
@@ -651,19 +676,19 @@ export class Storage {
   // Prices
   // -------------------------------------------------------------------------
 
-  /** Latest price state for every (model_id, provider) pair, keyed for change detection. */
+  /** Latest price state per (model_id, endpoint), keyed for change detection. */
   async getLatestPrices(): Promise<Map<string, LatestPriceState>> {
     const result = await this.pool.query(
-      `SELECT DISTINCT ON (model_id, provider)
-              model_id, provider, prompt_usd, completion_usd, request_usd, image_usd,
+      `SELECT DISTINCT ON (model_id, endpoint_tag)
+              model_id, endpoint_tag, prompt_usd, completion_usd, request_usd, image_usd,
               web_search_usd, internal_reasoning_usd, cache_read_usd, cache_write_usd,
               context_length, quantization
        FROM ${this.t("price_points")}
-       ORDER BY model_id, provider, observed_at DESC`,
+       ORDER BY model_id, endpoint_tag, observed_at DESC`,
     );
     const map = new Map<string, LatestPriceState>();
     for (const row of result.rows) {
-      map.set(priceStateKey(row.model_id, row.provider), {
+      map.set(priceStateKey(row.model_id, row.endpoint_tag), {
         pricing: {
           promptUsd: num(row.prompt_usd),
           completionUsd: num(row.completion_usd),
@@ -925,13 +950,14 @@ export class Storage {
     const p = point.pricing;
     await this.pool.query(
       `INSERT INTO ${this.t("price_points")} (
-        model_id, provider, observed_at, prompt_usd, completion_usd, request_usd, image_usd,
+        model_id, provider, endpoint_tag, observed_at, prompt_usd, completion_usd, request_usd, image_usd,
         web_search_usd, internal_reasoning_usd, cache_read_usd, cache_write_usd,
         context_length, quantization, is_free, raw
-      ) VALUES ($1,$2,COALESCE($3, NOW()),$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
+      ) VALUES ($1,$2,$3,COALESCE($4, NOW()),$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
       [
         point.modelId,
         point.provider,
+        endpointTagOf(point),
         point.observedAt ?? null,
         p.promptUsd,
         p.completionUsd,
@@ -958,13 +984,14 @@ export class Storage {
         const p = point.pricing;
         await client.query(
           `INSERT INTO ${this.t("price_points")} (
-            model_id, provider, observed_at, prompt_usd, completion_usd, request_usd, image_usd,
+            model_id, provider, endpoint_tag, observed_at, prompt_usd, completion_usd, request_usd, image_usd,
             web_search_usd, internal_reasoning_usd, cache_read_usd, cache_write_usd,
             context_length, quantization, is_free, raw
-          ) VALUES ($1,$2,COALESCE($3, NOW()),$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
+          ) VALUES ($1,$2,$3,COALESCE($4, NOW()),$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
           [
             point.modelId,
             point.provider,
+            endpointTagOf(point),
             point.observedAt ?? null,
             p.promptUsd,
             p.completionUsd,
@@ -1006,7 +1033,7 @@ export class Storage {
     }
     params.push(resolveLimit(filter.limit));
     const result = await this.pool.query(
-      `SELECT provider, observed_at, prompt_usd, completion_usd, request_usd, image_usd,
+      `SELECT provider, endpoint_tag, observed_at, prompt_usd, completion_usd, request_usd, image_usd,
               web_search_usd, internal_reasoning_usd, cache_read_usd, cache_write_usd,
               context_length, quantization, is_free
        FROM ${this.t("price_points")}
@@ -1018,15 +1045,25 @@ export class Storage {
     return result.rows.map(mapPriceHistory);
   }
 
-  /** Latest price per provider for a model (for the providers table on a model page). */
+  /**
+   * Latest price per provider for a model (for the providers table on a model
+   * page). A provider with several endpoints is represented by its base one
+   * (`azure` over `azure/eu`), falling back to the cheapest — the same quote
+   * OpenRouter headlines for that provider.
+   */
   async getLatestProviderPrices(modelId: string): Promise<PriceHistoryRow[]> {
     const result = await this.pool.query(
-      `SELECT DISTINCT ON (provider) provider, observed_at, prompt_usd, completion_usd,
-              request_usd, image_usd, web_search_usd, internal_reasoning_usd,
-              cache_read_usd, cache_write_usd, context_length, quantization, is_free
-       FROM ${this.t("price_points")}
-       WHERE model_id = $1 AND provider <> ''
-       ORDER BY provider, observed_at DESC`,
+      `WITH per_endpoint AS (
+         SELECT DISTINCT ON (endpoint_tag) provider, endpoint_tag, observed_at, prompt_usd, completion_usd,
+                request_usd, image_usd, web_search_usd, internal_reasoning_usd,
+                cache_read_usd, cache_write_usd, context_length, quantization, is_free
+         FROM ${this.t("price_points")}
+         WHERE model_id = $1 AND provider <> ''
+         ORDER BY endpoint_tag, observed_at DESC
+       )
+       SELECT DISTINCT ON (provider) *
+       FROM per_endpoint
+       ORDER BY provider, ${BASE_ENDPOINT_FIRST}, prompt_usd ASC NULLS LAST`,
       [modelId],
     );
     return result.rows.map(mapPriceHistory);
@@ -1050,7 +1087,7 @@ export class Storage {
     }
     params.push(resolveLimit(filter.limit));
     const result = await this.pool.query(
-      `SELECT provider, observed_at, prompt_usd, completion_usd, request_usd, image_usd,
+      `SELECT provider, endpoint_tag, observed_at, prompt_usd, completion_usd, request_usd, image_usd,
               web_search_usd, internal_reasoning_usd, cache_read_usd, cache_write_usd,
               context_length, quantization, is_free
        FROM ${this.t("price_points")}
@@ -1243,16 +1280,24 @@ export class Storage {
     }));
   }
 
-  /** Per-provider rollup from the latest price of each (model, provider) pair. */
+  /**
+   * Per-provider rollup from the latest price of each (model, provider) pair.
+   * Endpoints collapse first — three OpenAI tiers of one model are one model,
+   * quoted at the tier that provider leads with.
+   */
   async getProviderStats(): Promise<
     { provider: string; modelCount: number; cheapestUsdPerMtok: number | null; avgUsdPerMtok: number | null }[]
   > {
     const result = await this.pool.query(
-      `WITH latest AS (
-         SELECT DISTINCT ON (model_id, provider) model_id, provider, prompt_usd, completion_usd
+      `WITH per_endpoint AS (
+         SELECT DISTINCT ON (model_id, endpoint_tag) model_id, provider, endpoint_tag, prompt_usd, completion_usd
          FROM ${this.t("price_points")}
          WHERE provider <> ''
-         ORDER BY model_id, provider, observed_at DESC
+         ORDER BY model_id, endpoint_tag, observed_at DESC
+       ), latest AS (
+         SELECT DISTINCT ON (model_id, provider) model_id, provider, prompt_usd, completion_usd
+         FROM per_endpoint
+         ORDER BY model_id, provider, ${BASE_ENDPOINT_FIRST}, prompt_usd ASC NULLS LAST
        ), blended AS (
          SELECT provider,
                 (COALESCE(prompt_usd, completion_usd, 0) * 0.5 + COALESCE(completion_usd, prompt_usd, 0) * 0.5) * 1000000 AS per_mtok,
@@ -1780,8 +1825,22 @@ export class Storage {
 // ---------------------------------------------------------------------------
 
 /** Stable key for a (model, provider) price pair. "" provider = model-level price. */
-export function priceStateKey(modelId: string, provider: string): string {
-  return `${modelId}\u0000${provider}`;
+/**
+ * Order fragment putting a provider's base endpoint ahead of its variants:
+ * `openai` before `openai/flex`, `azure` before `azure/eu`. FALSE sorts first
+ * in Postgres, so the tags without a "/" suffix lead.
+ */
+const BASE_ENDPOINT_FIRST = "(POSITION('/' IN endpoint_tag) > 0)";
+
+/** Change-detection key: one slot per endpoint, "" being the model-level row. */
+export function priceStateKey(modelId: string, endpointTag: string): string {
+  return `${modelId}\u0000${endpointTag}`;
+}
+
+/** An endpoint row always keys off its tag; provider name is the fallback. */
+function endpointTagOf(point: PricePointInsert): string {
+  if (point.provider === "") return "";
+  return point.endpointTag || point.provider;
 }
 
 function usageInsertSql(table: string, onConflict: UsageConflict): string {
@@ -1884,6 +1943,7 @@ function mapModelWithLatest(row: any): ModelWithLatest {
 function mapPriceHistory(row: any): PriceHistoryRow {
   return {
     provider: row.provider,
+    endpointTag: row.endpoint_tag ?? "",
     observedAt: toIso(row.observed_at) ?? "",
     promptUsd: num(row.prompt_usd),
     completionUsd: num(row.completion_usd),

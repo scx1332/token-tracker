@@ -24,6 +24,25 @@ export const METRIC_LABEL: Record<Metric, string> = {
   output: "Output $/M",
 };
 
+/**
+ * The identity of a price series. One provider can sell the same model from
+ * several endpoints at different prices — OpenAI as `openai`, `openai/flex`
+ * and `openai/priority`, Azure per region — so the line on the chart is an
+ * endpoint, not a provider. Base endpoints keep the bare provider name;
+ * variants carry their suffix: "OpenAI · flex", "Azure · eu".
+ */
+export function endpointLabel(row: { provider: string; endpointTag?: string }): string {
+  const tag = row.endpointTag ?? "";
+  const slash = tag.indexOf("/");
+  return slash > -1 ? `${row.provider} · ${tag.slice(slash + 1)}` : row.provider;
+}
+
+/** The provider behind an endpoint label — the join key for traffic data. */
+export function providerOfLabel(label: string): string {
+  const sep = label.indexOf(" · ");
+  return sep > -1 ? label.slice(0, sep) : label;
+}
+
 /** A price row expressed as USD per 1M tokens for the chosen metric, or null. */
 export function metricPerMtok(
   row: { promptUsd: number | null; completionUsd: number | null; isFree?: boolean },
@@ -42,20 +61,20 @@ export function metricPerMtok(
 
 export interface EnvelopePoint {
   date: string; // ISO timestamp of the change event
-  min: number | null; // cheapest provider's $/M at this time
-  max: number | null; // dearest provider's $/M at this time
-  cheapest: string | null; // which provider held the minimum
-  count: number; // providers quoting at this time
+  min: number | null; // cheapest endpoint's $/M at this time
+  max: number | null; // dearest endpoint's $/M at this time
+  cheapest: string | null; // which endpoint held the minimum
+  count: number; // endpoints quoting at this time
 }
 
 /**
  * Reconstruct, at every price-change event, the min / max $/M across all
- * providers that have quoted so far. Each provider is a step function (a quote
+ * endpoints that have quoted so far. Each endpoint is a step function (a quote
  * holds until its next change), so we walk the merged timeline and, at each
- * event, take the extremes of every provider's last-known quote.
+ * event, take the extremes of every endpoint's last-known quote.
  */
 export function minEnvelope(points: PriceHistoryRow[], metric: Metric): EnvelopePoint[] {
-  const byProvider = groupByProvider(points);
+  const byProvider = groupByEndpoint(points);
   const times = [...new Set(points.map((p) => p.observedAt))].sort((a, b) => a.localeCompare(b));
   const cursor = new Map<string, number>();
   const lastVal = new Map<string, number | null>();
@@ -93,29 +112,32 @@ export function minEnvelope(points: PriceHistoryRow[], metric: Metric): Envelope
 }
 
 export interface ProviderQuote {
+  /** Endpoint label — the series identity ("OpenAI", "OpenAI · flex"). */
+  label: string;
+  /** The provider behind it; several labels can share one provider. */
   provider: string;
   value: number | null; // latest $/M for the metric
   row: PriceHistoryRow; // latest row (context, quant, free flag …)
 }
 
-/** Latest quote per provider, cheapest first — the current "order book". */
+/** Latest quote per endpoint, cheapest first — the current "order book". */
 export function providerOrderBook(points: PriceHistoryRow[], metric: Metric): ProviderQuote[] {
   const latest = new Map<string, PriceHistoryRow>(); // points are asc → last write wins
-  for (const p of points) latest.set(p.provider, p);
+  for (const p of points) latest.set(endpointLabel(p), p);
   return [...latest.entries()]
-    .map(([provider, row]) => ({ provider, value: metricPerMtok(row, metric), row }))
+    .map(([label, row]) => ({ label, provider: row.provider, value: metricPerMtok(row, metric), row }))
     .sort((a, b) => (a.value ?? Infinity) - (b.value ?? Infinity));
 }
 
-/** One provider's own price change-log, oldest → newest. */
-export function seriesForProvider(points: PriceHistoryRow[], provider: string): PriceHistoryRow[] {
+/** One endpoint's own price change-log, oldest → newest. */
+export function seriesForEndpoint(points: PriceHistoryRow[], label: string): PriceHistoryRow[] {
   return points
-    .filter((p) => p.provider === provider)
+    .filter((p) => endpointLabel(p) === label)
     .sort((a, b) => a.observedAt.localeCompare(b.observedAt));
 }
 
-export function distinctProviders(points: PriceHistoryRow[]): string[] {
-  return [...new Set(points.map((p) => p.provider))].sort((a, b) => a.localeCompare(b));
+export function distinctEndpoints(points: PriceHistoryRow[]): string[] {
+  return [...new Set(points.map(endpointLabel))].sort((a, b) => a.localeCompare(b));
 }
 
 /** Percent change between the first and last defined value of an envelope field. */
@@ -128,12 +150,13 @@ export function envelopeChange(env: EnvelopePoint[], field: "min" | "max" = "min
   return (last - first) / Math.abs(first);
 }
 
-function groupByProvider(points: PriceHistoryRow[]): Map<string, PriceHistoryRow[]> {
+function groupByEndpoint(points: PriceHistoryRow[]): Map<string, PriceHistoryRow[]> {
   const byProvider = new Map<string, PriceHistoryRow[]>();
   for (const p of points) {
-    const arr = byProvider.get(p.provider);
+    const label = endpointLabel(p);
+    const arr = byProvider.get(label);
     if (arr) arr.push(p);
-    else byProvider.set(p.provider, [p]);
+    else byProvider.set(label, [p]);
   }
   for (const arr of byProvider.values()) arr.sort((a, b) => a.observedAt.localeCompare(b.observedAt));
   return byProvider;

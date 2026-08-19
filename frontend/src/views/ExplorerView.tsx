@@ -5,12 +5,13 @@ import { Panel, Loading, ErrorNote, Empty, Badge } from "../components";
 import { PriceEnvelopeChart, ProviderOrderBookChart, UsageHistoryChart, PROVIDER_COLORS } from "../charts";
 import {
   METRIC_LABEL,
-  distinctProviders,
+  distinctEndpoints,
   envelopeChange,
   metricPerMtok,
   minEnvelope,
   providerOrderBook,
-  seriesForProvider,
+  seriesForEndpoint,
+  providerOfLabel,
   type Metric,
 } from "../price";
 import { compact, displayName, mtok, perMtok, shortDate, usd } from "../format";
@@ -123,7 +124,11 @@ export function ExplorerView({
     return points.filter((p) => p.observedAt >= since);
   }, [points, days]);
 
-  const allProviders = useMemo(() => distinctProviders(points), [points]);
+  // Series identity is the endpoint, not the provider: OpenAI sells the same
+  // model as `openai`, `openai/flex` and `openai/priority` at three prices.
+  // Traffic data is only per provider, so the joins below key off
+  // providerOfLabel() while the chart keys off the label.
+  const allProviders = useMemo(() => distinctEndpoints(points), [points]);
   const orderBook = useMemo(() => providerOrderBook(points, metric), [points, metric]);
 
   // Per-provider volume estimate: OpenRouter only publishes request counts
@@ -143,6 +148,7 @@ export function ExplorerView({
     // pricing API uses short names ("Novita", "Baidu") — join on a normalized
     // prefix match so quotes and traffic line up.
     const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+    // Cheapest-first order book → the first match is the provider's best quote.
     const book = orderBook.map((q) => ({ q, n: norm(q.provider) }));
     const findQuote = (name: string) => {
       const n = norm(name);
@@ -171,17 +177,29 @@ export function ExplorerView({
     [volumeRows],
   );
 
+  // Traffic bars are per provider; clicking one toggles that provider's base
+  // (or cheapest) endpoint line.
+  const labelForProvider = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const q of orderBook) if (!m.has(q.provider)) m.set(q.provider, q.label);
+    return m;
+  }, [orderBook]);
+  /** One label per provider — the row its traffic figures are booked against. */
+  const primaryLabels = useMemo(() => new Set(labelForProvider.values()), [labelForProvider]);
+
   // Providers under 1% of live traffic are noise — hide them everywhere
   // (pinned ones always stay; no traffic data → show everything).
   const activeSet = useMemo(() => {
     if (!volumeRows.length) return null;
     return new Set(volumeRows.filter((r) => r.share >= 0.01).map((r) => r.provider.toLowerCase()));
   }, [volumeRows]);
-  const isShown = (p: string) => !activeSet || activeSet.has(p.toLowerCase()) || selected.includes(p);
+  // A provider carrying traffic shows all of its endpoints, not just the one
+  // the traffic feed could be joined to.
+  const isShown = (p: string) => !activeSet || activeSet.has(providerOfLabel(p).toLowerCase()) || selected.includes(p);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const providers = useMemo(() => allProviders.filter(isShown), [allProviders, activeSet, selected]);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const shownBook = useMemo(() => orderBook.filter((q) => isShown(q.provider)), [orderBook, activeSet, selected]);
+  const shownBook = useMemo(() => orderBook.filter((q) => isShown(q.label)), [orderBook, activeSet, selected]);
   const shownPoints = useMemo(
     () => (activeSet ? rangedPoints.filter((p) => isShown(p.provider)) : rangedPoints),
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -194,11 +212,21 @@ export function ExplorerView({
   // traffic (≥AUTO_SHARE of requests), most popular first so colors rank by
   // share. Names must exist on the pricing side or there is nothing to draw.
   const autoProviders = useMemo(() => {
-    const byName = new Map(allProviders.map((p) => [p.toLowerCase(), p]));
+    // One busy provider can own several endpoints; chart its base one (the
+    // label that is just the provider name) and leave the tiers to pinning,
+    // or its cheapest label when it has no base endpoint.
+    const byProvider = new Map<string, string[]>();
+    for (const label of allProviders) {
+      const key = providerOfLabel(label).toLowerCase();
+      byProvider.set(key, [...(byProvider.get(key) ?? []), label]);
+    }
     return volumeRows
       .filter((r) => r.share >= AUTO_SHARE)
       .sort((a, b) => b.share - a.share)
-      .map((r) => byName.get(r.provider.toLowerCase()))
+      .map((r) => {
+        const labels = byProvider.get(r.provider.toLowerCase()) ?? [];
+        return labels.find((l) => !l.includes(" · ")) ?? labels[0];
+      })
       .filter((p): p is string => p !== undefined);
   }, [volumeRows, allProviders]);
 
@@ -240,7 +268,7 @@ export function ExplorerView({
     const now = new Date().toISOString();
     const lines: { name: string; x: string[]; y: (number | null)[]; color: string }[] = [];
     shownProviders.forEach((name, i) => {
-      const rows = seriesForProvider(rangedPoints, name);
+      const rows = seriesForEndpoint(rangedPoints, name);
       if (!rows.length) return;
       const x = rows.map((r) => r.observedAt);
       const y = rows.map((r) => metricPerMtok(r, metric));
@@ -438,19 +466,24 @@ export function ExplorerView({
           </div>
           {bookMode === "price" ? (
             shownBook.some((q) => q.value != null) ? (
-              <ProviderOrderBookChart quotes={shownBook} selected={shownProviders} onPick={toggleProvider} kind="price" />
+              <ProviderOrderBookChart
+              quotes={shownBook.map((q) => ({ provider: q.label, value: q.value }))}
+              selected={shownProviders}
+              onPick={toggleProvider}
+              kind="price"
+            />
             ) : (
               <Empty label="No provider quotes yet." />
             )
           ) : volumeRows.length ? (
             <ProviderOrderBookChart
               quotes={volumeRows
-                .filter((r) => r.share >= 0.01 || shownProviders.includes(r.provider))
+                .filter((r) => r.share >= 0.01 || shownProviders.map(providerOfLabel).includes(r.provider))
                 .map((r) => ({ provider: r.provider, value: bookMode === "tokens" ? r.tokens : r.spendUsd }))
                 .filter((q) => q.value != null)
                 .sort((a, b) => (b.value ?? 0) - (a.value ?? 0))}
-              selected={shownProviders}
-              onPick={toggleProvider}
+              selected={shownProviders.map(providerOfLabel)}
+              onPick={(name) => toggleProvider(labelForProvider.get(name) ?? name)}
               kind={bookMode}
             />
           ) : (
@@ -493,20 +526,23 @@ export function ExplorerView({
             <tbody>
               {shownBook.map((q, i) => (
                 <tr
-                  key={q.provider}
-                  className={shownProviders.includes(q.provider) ? "row-sel" : ""}
-                  onClick={() => toggleProvider(q.provider)}
+                  key={q.label}
+                  className={shownProviders.includes(q.label) ? "row-sel" : ""}
+                  onClick={() => toggleProvider(q.label)}
                 >
                   <td className="left" style={{ fontFamily: "var(--font-body)", fontWeight: 500 }}>
-                    {q.provider}
+                    {q.label}
                     {i === 0 && <Badge kind="free">cheapest</Badge>}
-                    {shownProviders.includes(q.provider) && <Badge kind="ghost">on chart</Badge>}
+                    {shownProviders.includes(q.label) && <Badge kind="ghost">on chart</Badge>}
                   </td>
                   <td className="val-min" style={{ fontWeight: 600 }}>{q.row.isFree ? "$0" : mtok(q.value)}</td>
                   <td>{q.row.isFree ? "$0" : perMtok(q.row.promptUsd)}</td>
                   <td>{q.row.isFree ? "$0" : perMtok(q.row.completionUsd)}</td>
                   {(() => {
-                    const v = volumeByProvider.get(q.provider.toLowerCase());
+                    // Traffic is published per provider, not per endpoint —
+                    // book it against that provider's cheapest row and leave
+                    // its other tiers blank rather than counting it twice.
+                    const v = primaryLabels.has(q.label) ? volumeByProvider.get(q.provider.toLowerCase()) : undefined;
                     return (
                       <>
                         <td style={{ color: "var(--muted)" }}>{v ? `${(v.share * 100).toFixed(1)}%` : "—"}</td>

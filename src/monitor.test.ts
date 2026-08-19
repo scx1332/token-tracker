@@ -162,7 +162,7 @@ describe("one source stops while the rest keep going", () => {
     ["marketSnapshot", "market.snapshot", 4],
     ["usageProvider", "usage.providers", 60],
     ["effectivePrice", "prices.effective", 60],
-    ["priceChange", "prices.changes", 30],
+    ["priceChange", "prices.changes", 60],
     ["gpuSweep", "gpu.sweep", 2],
   ];
 
@@ -184,11 +184,13 @@ describe("one source stops while the rest keep going", () => {
     expect(check(facts, "gpu.sweep").status).toBe("fail");
   });
 
-  it("lets prices stay quiet for a few hours — a change-log with no changes is legal", () => {
+  it("lets prices stay quiet for half a day — a change-log with no changes is legal", () => {
     const facts = healthy();
-    facts.latest.priceChange = ago(4);
+    // 6h is the quietest stretch the real (per-endpoint) change-log has ever
+    // had; only past double that does silence mean something broke.
+    facts.latest.priceChange = ago(6);
     expect(check(facts, "prices.changes").status).toBe("ok");
-    facts.latest.priceChange = ago(8);
+    facts.latest.priceChange = ago(14);
     expect(check(facts, "prices.changes").status).toBe("warn");
   });
 

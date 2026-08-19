@@ -1,11 +1,29 @@
 import { test, expect, describe } from "bun:test";
 import type { PriceHistoryRow } from "./api";
-import { metricPerMtok, minEnvelope, providerOrderBook, seriesForProvider, envelopeChange } from "./price";
+import {
+  metricPerMtok,
+  minEnvelope,
+  providerOrderBook,
+  seriesForEndpoint,
+  envelopeChange,
+  endpointLabel,
+  providerOfLabel,
+} from "./price";
 
 // Build a price-point row; only the fields the pure math reads need to be set.
-function row(provider: string, observedAt: string, promptUsd: number | null, completionUsd: number | null, isFree = false): PriceHistoryRow {
+// `provider` doubles as the endpoint tag unless one is given — a provider with
+// a single base endpoint, which is the ordinary case.
+function row(
+  provider: string,
+  observedAt: string,
+  promptUsd: number | null,
+  completionUsd: number | null,
+  isFree = false,
+  endpointTag?: string,
+): PriceHistoryRow {
   return {
     provider,
+    endpointTag: endpointTag ?? provider,
     observedAt,
     promptUsd,
     completionUsd,
@@ -84,14 +102,14 @@ describe("providerOrderBook", () => {
   });
 });
 
-describe("seriesForProvider + envelopeChange", () => {
-  test("filters to one provider in time order", () => {
+describe("seriesForEndpoint + envelopeChange", () => {
+  test("filters to one endpoint in time order", () => {
     const points = [
       row("B", "2026-01-02T00:00:00Z", 0.000002, 0.000002),
       row("A", "2026-01-01T00:00:00Z", 0.000001, 0.000001),
       row("A", "2026-01-03T00:00:00Z", 0.000003, 0.000003),
     ];
-    const s = seriesForProvider(points, "A");
+    const s = seriesForEndpoint(points, "A");
     expect(s.map((r) => r.observedAt)).toEqual(["2026-01-01T00:00:00Z", "2026-01-03T00:00:00Z"]);
   });
 
@@ -104,5 +122,46 @@ describe("seriesForProvider + envelopeChange", () => {
       "blended",
     );
     expect(envelopeChange(env, "min")).toBeCloseTo(-0.25, 6);
+  });
+});
+
+// The bug this whole split exists for: OpenAI sells one model as `openai`,
+// `openai/flex` and `openai/priority` at three prices at the same instant.
+// Keyed by provider name those three took turns overwriting each other and
+// the chart showed an hourly sawtooth that never happened.
+describe("one provider, several endpoints", () => {
+  const points = [
+    row("OpenAI", "2026-08-18T00:00:00Z", 0.0000025, 0.000015, false, "openai"),
+    row("OpenAI", "2026-08-18T00:00:00Z", 0.00000125, 0.0000075, false, "openai/flex"),
+    row("OpenAI", "2026-08-18T00:00:00Z", 0.000005, 0.00003, false, "openai/priority"),
+  ];
+
+  test("labels keep the provider name for its base endpoint and suffix the tiers", () => {
+    expect(points.map(endpointLabel)).toEqual(["OpenAI", "OpenAI · flex", "OpenAI · priority"]);
+    expect(providerOfLabel("OpenAI · flex")).toBe("OpenAI");
+    expect(providerOfLabel("OpenAI")).toBe("OpenAI");
+  });
+
+  test("the order book quotes each tier separately, cheapest first", () => {
+    const book = providerOrderBook(points, "input");
+    expect(book.map((q) => q.label)).toEqual(["OpenAI · flex", "OpenAI", "OpenAI · priority"]);
+    expect(book.every((q) => q.provider === "OpenAI")).toBe(true);
+    expect(book[0]!.value).toBeCloseTo(1.25, 9);
+  });
+
+  test("each tier holds its own price instead of overwriting the others", () => {
+    expect(seriesForEndpoint(points, "OpenAI · flex").map((r) => r.promptUsd)).toEqual([0.00000125]);
+    // Three quotes at one instant = one event with a $1.25–$5.00 spread, not
+    // three price changes.
+    const env = minEnvelope(points, "input");
+    expect(env).toHaveLength(1);
+    expect(env[0]!.count).toBe(3);
+    expect(env[0]!.min).toBeCloseTo(1.25, 9);
+    expect(env[0]!.max).toBeCloseTo(5, 9);
+    expect(env[0]!.cheapest).toBe("OpenAI · flex");
+  });
+
+  test("rows with no tag (pre-split history) fall back to the provider name", () => {
+    expect(endpointLabel({ provider: "Azure" })).toBe("Azure");
   });
 });

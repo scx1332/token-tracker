@@ -152,6 +152,41 @@ went from $457.9M to $252.3M (−45%) and the curve is flat-to-rising, tracking
 token growth. Models whose providers appear once were never affected — their
 ratio was exactly 1.00 throughout, which is how the bug was identified.
 
+**The price change-log was keyed by provider, and providers sell tiers.** Same
+family of bug, found 2026-08-19. `price_points` recorded a change whenever an
+endpoint's price differed from the last one stored for `(model, provider)` —
+but OpenAI sells gpt-5.6-sol as `openai` ($2.50/M), `openai/flex` ($1.25) and
+`openai/priority` ($5.00) at the same moment, and Azure sells it per region. The
+three tiers shared one slot, so each sweep found every tier "changed" and wrote
+a row. The chart showed an hourly sawtooth across prices that were all standing
+unchanged.
+
+At the repair, 34,257 provider rows held **2,017 real events** — 94% phantom.
+It was concentrated: 122 of 922 (model, provider) pairs have more than one
+endpoint, and those pairs held 95% of the rows, because they are the ones that
+churned every hour. Sol alone: 708 rows, 10 real events.
+
+The log is now keyed by endpoint tag (`endpoint_tag`, recovered for old rows
+from `raw->>'tag'`), and `scripts/prune-phantom-prices.sql` collapsed the
+history — 34,901 rows to 2,271. Two wrinkles worth knowing:
+
+- OpenRouter publishes genuine **same-tag duplicates** — two
+  `google-vertex/us-south1` endpoints for qwen3-235b, two `together` endpoints
+  for gemma-4-31b, alike in every field but price. `endpointTags` (src/pricing.ts)
+  splits them by price rank, cheapest keeping the bare tag. In the old data these
+  appeared as one row per sweep alternating between two prices, since the loop
+  only ever wrote whichever twin disagreed with the shared slot.
+- The `prices.changes` staleness thresholds were calibrated against the churn
+  ("~160 changes an hour"). The real rate is ~70 a day across ~1.1k endpoints,
+  quietest observed stretch 6h, so they moved to warn 12h / fail 48h.
+
+What Sol's history says once cleaned is a single real event: OpenRouter applied
+a 50% discount between 15:29 and 17:29 UTC on 2026-08-17 (`pricing.discount`
+went 0 → 0.5, `prompt` 5.0 → 2.5/M). The endpoints API already returns the
+**discounted** price in `pricing.prompt`; `discount` says how much of it is
+promotional, and `overrides` carries the long-context tier (>272k prompt tokens
+at 2×), which we do not store.
+
 OpenRouter's own numbers were consistent the whole time. Where both its
 endpoints cover the same day, `provider-token-chart` and `rankings` agree per
 model to 1.00. Reach for "our assembly is wrong" before "the source is faking".
