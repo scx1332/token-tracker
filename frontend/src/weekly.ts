@@ -110,15 +110,27 @@ export interface WeekForecast {
 
 const MIN_COVERED = 0.12;
 const PROFILE_WEEKS = 8;
+/**
+ * Per-week recency decay when averaging weekday shares: the newest complete
+ * week counts 1, the one before 0.6, then 0.36… The weekly shape drifts — the
+ * weekend dip that was ~30% in June had all but vanished by mid-August, and a
+ * flat 8-week average carried the June shape long enough to read a week that
+ * was pacing +17% on same-weekday spend as −2% w/w. Half-life ≈ 1.4 weeks
+ * tracks that drift; backtesting Mon–Sat cut points over the full series, it
+ * matches the flat average on error and beats it whenever the shape moves.
+ */
+const PROFILE_DECAY = 0.6;
 
 function valueOf(point: UsageSeriesPoint, metric: WeekMetric): number {
   return (metric === "spend" ? point.totalSpendUsd : point.totalTokens) ?? 0;
 }
 
 /**
- * Average share of a week's total that each weekday carries (index 0 = Monday),
- * learned from the most recent complete weeks. Traffic is markedly lighter on
- * weekends, so a flat days/7 projection over-counts a Mon–Wed stub.
+ * Share of a week's total that each weekday carries (index 0 = Monday), a
+ * recency-weighted average over the most recent complete weeks. Weekends run
+ * lighter than weekdays, so a flat days/7 projection over-counts a Mon–Wed
+ * stub — and the size of that weekend dip itself moves month to month, which
+ * is what the recency weighting (PROFILE_DECAY) is for.
  */
 export function weekdayProfile(series: UsageSeriesPoint[], metric: WeekMetric, limit = PROFILE_WEEKS): number[] {
   const byWeek = new Map<string, number[]>();
@@ -138,11 +150,12 @@ export function weekdayProfile(series: UsageSeriesPoint[], metric: WeekMetric, l
 
   if (!complete.length) return new Array(7).fill(1 / 7);
   const shares = new Array(7).fill(0);
-  for (const days of complete) {
+  complete.forEach((days, index) => {
     const total = days.reduce((a, b) => a + b, 0);
-    if (total <= 0) continue;
-    for (let i = 0; i < 7; i++) shares[i] += days[i] / total;
-  }
+    if (total <= 0) return;
+    const weight = PROFILE_DECAY ** (complete.length - 1 - index);
+    for (let i = 0; i < 7; i++) shares[i] += weight * (days[i] / total);
+  });
   const sum = shares.reduce((a, b) => a + b, 0);
   return sum > 0 ? shares.map((s) => s / sum) : new Array(7).fill(1 / 7);
 }

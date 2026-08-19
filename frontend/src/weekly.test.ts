@@ -115,6 +115,28 @@ describe("weekdayProfile", () => {
   it("falls back to a flat week without complete history", () => {
     expect(weekdayProfile([day("2026-08-10", 1, 1)], "spend")[3]).toBeCloseTo(1 / 7, 6);
   });
+
+  // The weekly shape drifts — the weekend dip shrank from ~30% in June to
+  // roughly nothing by mid-August — and a flat average over 8 weeks kept
+  // projecting the old shape, understating a growing week by double digits.
+  // The profile must sit much nearer the newest weeks than the oldest.
+  it("weights recent weeks heaviest when the shape drifts", () => {
+    const dipped = shapedSeries(["2026-07-06", "2026-07-13"]); // Mon share 10/60
+    const flat: UsageSeriesPoint[] = []; // weekends recovered: every day 10, Mon share 10/70
+    for (const start of ["2026-07-20", "2026-07-27"]) {
+      const base = Date.parse(`${start}T00:00:00Z`);
+      for (let i = 0; i < 7; i++) {
+        flat.push(day(new Date(base + i * 86_400_000).toISOString().slice(0, 10), 10, 1000));
+      }
+    }
+    const profile = weekdayProfile([...dipped, ...flat], "spend");
+    // Decay 0.6: weights oldest→newest are 0.216, 0.36, 0.6, 1 (sum 2.176).
+    const expectedMonday = ((0.216 + 0.36) * (10 / 60) + (0.6 + 1) * (10 / 70)) / 2.176;
+    const flatAvgMonday = (10 / 60 + 10 / 60 + 10 / 70 + 10 / 70) / 4;
+    expect(profile[0]!).toBeCloseTo(expectedMonday, 6);
+    expect(profile[0]!).toBeLessThan(flatAvgMonday); // pulled toward the newer, flatter shape
+    expect(profile.reduce((a, b) => a + b, 0)).toBeCloseTo(1, 6);
+  });
 });
 
 describe("forecastCurrentWeek", () => {

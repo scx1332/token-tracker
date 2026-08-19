@@ -284,7 +284,8 @@ export function MarketView({ navigate }: { navigate: (to: string) => void }) {
             <div className="fc-method mono">
               {weekFmt(weekForecast.observed)} booked over {weekForecast.daysCovered} day
               {weekForecast.daysCovered === 1 ? "" : "s"} ÷ {(weekForecast.covered * 100).toFixed(0)}% — the share of a
-              normal week those weekdays carry, averaged over the last {weekForecast.basisWeeks} complete weeks
+              normal week those weekdays carry, learned from the last {weekForecast.basisWeeks} complete weeks with the
+              newest counting heaviest
               {weekForecast.weekendRatio !== null
                 ? ` (a weekend day runs ${Math.round((1 - weekForecast.weekendRatio) * 100)}% below a weekday, so the days still to come are not counted flat)`
                 : ""}
