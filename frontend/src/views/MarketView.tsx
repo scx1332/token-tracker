@@ -3,9 +3,9 @@ import { useEffect, useMemo, useState } from "react";
 import { api, type HealthResponse, type MarketResponse } from "../api";
 import { Kpi, Panel, SectionHead, RankList, Loading, ErrorNote, type RankItem } from "../components";
 import { SpendTokensChart, PriceIndexChart, WeeklyBarsChart, WeeklyRaceChart, ComputeVsTokensChart, C } from "../charts";
-import { usd, usdExact, compact, mtok, relTime, seriesChange, displayName, pct } from "../format";
+import { usd, usdExact, compact, mtok, relTime, seriesChange, displayName, pct, shortDate } from "../format";
 import { forecastCurrentWeek, toWeeklyBuckets, trimLeadingPartial } from "../weekly";
-import { closedOnly } from "../runningDay";
+import { closedOnly, isClosedDay } from "../runningDay";
 import { buildComparison } from "../gpu";
 import type { GpuDailyRow } from "../api";
 
@@ -118,6 +118,15 @@ export function MarketView({ navigate }: { navigate: (to: string) => void }) {
   const cheapest = latest?.cheapestFrontierUsdPerMtok ?? null;
 
   // Ranked by est. spend (price × tokens) — free-token volume alone doesn't move money.
+  // The leaderboard is one bucket_date deep, and that bucket is whatever
+  // `rankings?view=day` last published — normally *yesterday*, since OpenRouter
+  // only publishes complete days. Label the day instead of claiming "today".
+  const topModelsDate = market.topModels[0]?.bucketDate ?? null;
+  const topModelsDayNote = topModelsDate
+    ? isClosedDay(topModelsDate, Date.now())
+      ? "last complete day"
+      : "day still running"
+    : null;
   const topModelItems: RankItem[] = market.topModels.slice(0, 15).map((m) => {
     const max = market.topModels[0]?.spendUsd ?? 1;
     return {
@@ -428,8 +437,10 @@ export function MarketView({ navigate }: { navigate: (to: string) => void }) {
       <div className="two-col">
         <Panel className="panel-pad">
           <div className="chart-head">
-            <div className="chart-title">Top models · today</div>
-            <div className="chart-note">by est. daily spend (tokens × effective rate)</div>
+            <div className="chart-title">Top models · {topModelsDate ? shortDate(topModelsDate) : "—"}</div>
+            <div className="chart-note">
+              by est. daily spend (tokens × effective rate){topModelsDayNote ? ` · ${topModelsDayNote}` : ""}
+            </div>
           </div>
           <RankList items={topModelItems} onNavigate={navigate} />
         </Panel>
