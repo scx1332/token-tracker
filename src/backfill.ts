@@ -91,9 +91,9 @@ export async function runBackfill(deps: BackfillDeps): Promise<BackfillResult> {
         }
       }
 
-      // Split-less rows blend at the model's own observed mix, exactly as
-      // `repriceUsageSpend` does, so a refreshed row already carries the value
-      // the next daily sweep would give it.
+      // Written at the model's current rate and its own observed mix, then
+      // restated day by day below — the rate a day was actually priced at is
+      // what `repriceUsageSpendAsOf` puts back.
       const rate = effRates.get(model.modelId);
       const promptShare = (await storage.getObservedPromptShare(model.modelId)) ?? 0.9;
       const rows: UsageUpsert[] = [];
@@ -118,6 +118,8 @@ export async function runBackfill(deps: BackfillDeps): Promise<BackfillResult> {
       // Restate our own history (it once double-counted duplicate endpoints);
       // rankings rows are authoritative and stay untouched.
       const inserted = await storage.upsertUsageBatch(rows, { onConflict: "refresh-own" });
+      // Deep history spans price changes; price each day at its own rate.
+      await storage.repriceUsageSpendAsOf(model.modelId);
       processed += 1;
       if (processed % 15 === 0) log(`  ${processed}/${targets.length} models processed`);
       return inserted;

@@ -143,6 +143,55 @@ describe("Storage (integration)", () => {
     }
   });
 
+  // Spend used to be tokens × the newest rate, restamped across all history on
+  // every sweep, so a repricing could never show as spend and tokens parting
+  // company — the 50% cut to gpt-5.6-sol on 2026-08-17 retroactively marked
+  // down the five days before it.
+  it("prices each day at the rate in force that day, carrying back only before the first snapshot", async () => {
+    const { storage, cleanup } = await createIsolatedStorage();
+    try {
+      await storage.upsertModel(sampleModel("openai/gpt-5.6-sol", "openai/gpt-5.6-sol-x"));
+      const days = ["2026-08-11", "2026-08-13", "2026-08-18"];
+      await storage.upsertUsageBatch(
+        days.map((bucketDate) => ({
+          modelId: "openai/gpt-5.6-sol",
+          provider: "",
+          bucketDate,
+          tokens: 1_000_000,
+          promptTokens: 900_000,
+          completionTokens: 100_000,
+          requests: null,
+          estimatedSpendUsd: 0,
+          source: "rankings",
+        })),
+      );
+      // Full price on the 12th, half price from the 17th.
+      await storage.insertEffectivePriceSnapshots(
+        "openai/gpt-5.6-sol",
+        [{ provider: "", effInputPerMtok: 5, effOutputPerMtok: 30, totalTokens: null }],
+        new Date("2026-08-12T12:00:00Z"),
+      );
+      await storage.insertEffectivePriceSnapshots(
+        "openai/gpt-5.6-sol",
+        [{ provider: "", effInputPerMtok: 2.5, effOutputPerMtok: 15, totalTokens: null }],
+        new Date("2026-08-17T17:29:00Z"),
+      );
+
+      expect(await storage.repriceUsageSpendAsOf("openai/gpt-5.6-sol")).toBe(3);
+      const rows = await storage.getUsageHistory("openai/gpt-5.6-sol", { provider: "" });
+      const spendOn = (date: string) => rows.find((r) => r.bucketDate === date)?.estimatedSpendUsd;
+
+      // 0.9M × $5/M + 0.1M × $30/M = $7.50 at full price, $3.75 at half.
+      expect(spendOn("2026-08-13")).toBeCloseTo(7.5, 9);
+      expect(spendOn("2026-08-18")).toBeCloseTo(3.75, 9);
+      // The 11th predates every snapshot: the earliest known rate carries back,
+      // it does not inherit today's discount.
+      expect(spendOn("2026-08-11")).toBeCloseTo(7.5, 9);
+    } finally {
+      await cleanup();
+    }
+  });
+
   it("upserts usage; gap-fill mode never overwrites existing rows", async () => {
     const { storage, cleanup } = await createIsolatedStorage();
     try {

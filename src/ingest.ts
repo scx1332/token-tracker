@@ -430,16 +430,6 @@ async function ingestProviderUsage(deps: IngestDeps): Promise<void> {
         await storage.insertEffectivePriceSnapshots(m.modelId, effRows, capturedAt);
         priceRows += effRows.length;
 
-        // Re-price this model's daily history at the effective rates (carry-back:
-        // today's real paid rate is the best estimate for past days too).
-        if (eff.weightedInputPerMtok !== null && eff.weightedInputPerMtok > 0 && eff.weightedOutputPerMtok !== null) {
-          repriced += await storage.repriceUsageSpend(
-            m.modelId,
-            eff.weightedInputPerMtok / 1_000_000,
-            eff.weightedOutputPerMtok / 1_000_000,
-          );
-        }
-
         // Per-provider daily tokens, priced at the provider's effective rates
         // blended by the model's own observed prompt/completion mix.
         const promptShare = (await storage.getObservedPromptShare(m.modelId)) ?? 0.9;
@@ -467,6 +457,11 @@ async function ingestProviderUsage(deps: IngestDeps): Promise<void> {
           return storage.upsertUsageBatch(rows, { onConflict: "update" });
         });
         usageRows += perProvider.reduce<number>((a, b) => a + (b ?? 0), 0);
+
+        // Re-price this model's history — model-level and per-provider rows —
+        // at the rate in force on each day. Runs last so the rows just written
+        // above are covered, and so today's snapshot is already stored.
+        repriced += await storage.repriceUsageSpendAsOf(m.modelId);
       } catch {
         // Best-effort per model.
       }

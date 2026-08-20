@@ -782,22 +782,65 @@ export class Storage {
     return share !== null && share > 0 && share <= 1 ? share : null;
   }
 
-  async repriceUsageSpend(modelId: string, inputPerTok: number, outputPerTok: number): Promise<number> {
+  /**
+   * Re-price a model's whole usage history at the effective rate that was in
+   * force on each day, model-level and per-provider rows alike.
+   *
+   * This used to stamp every row with the newest rate ("today's real paid rate
+   * is the best estimate for past days too"), which was defensible while we
+   * had no rate history — but it made spend a pure restatement of tokens, so a
+   * repricing could never show up as spend and tokens parting company. When
+   * OpenRouter halved gpt-5.6-sol on 2026-08-17, the five preceding days were
+   * silently marked down to the discounted rate as though the discount had
+   * always existed.
+   *
+   * Days that precede a model's first effective-price snapshot still carry the
+   * earliest known rate back — there is no rate history before the sweep
+   * started (2026-08-12) and none can be re-fetched — so only the observed
+   * window carries real variation. Note also that OpenRouter's effective price
+   * is itself a trailing usage-weighted blend, so it eases into a price change
+   * over a day or two rather than stepping on the hour.
+   */
+  async repriceUsageSpendAsOf(modelId: string): Promise<number> {
     // Split-less rows blend at the model's own observed prompt share (falling
     // back to the market-typical 0.9) — a flat 90/10 overweights output for
     // agentic models whose real mix is ~98/2.
     const promptShare = (await this.getObservedPromptShare(modelId)) ?? 0.9;
     const res = await this.pool.query(
-      `UPDATE ${this.t("usage_snapshots")}
+      `WITH first_rate AS (
+         SELECT DISTINCT ON (provider) provider,
+                eff_input_usd_per_mtok AS in_mtok, eff_output_usd_per_mtok AS out_mtok
+         FROM ${this.t("effective_price_snapshots")}
+         WHERE model_id = $1 AND eff_input_usd_per_mtok > 0 AND eff_output_usd_per_mtok IS NOT NULL
+         ORDER BY provider, captured_at ASC
+       ), target AS (
+         SELECT us.provider, us.bucket_date,
+                COALESCE(asof.in_mtok, f.in_mtok) / 1000000 AS in_per_tok,
+                COALESCE(asof.out_mtok, f.out_mtok) / 1000000 AS out_per_tok
+         FROM ${this.t("usage_snapshots")} us
+         JOIN first_rate f ON f.provider = us.provider
+         LEFT JOIN LATERAL (
+           SELECT s.eff_input_usd_per_mtok AS in_mtok, s.eff_output_usd_per_mtok AS out_mtok
+           FROM ${this.t("effective_price_snapshots")} s
+           WHERE s.model_id = us.model_id AND s.provider = us.provider
+             AND s.captured_at < us.bucket_date + INTERVAL '1 day'
+             AND s.eff_input_usd_per_mtok > 0 AND s.eff_output_usd_per_mtok IS NOT NULL
+           ORDER BY s.captured_at DESC
+           LIMIT 1
+         ) asof ON TRUE
+         WHERE us.model_id = $1
+       )
+       UPDATE ${this.t("usage_snapshots")} us
        SET estimated_spend_usd = CASE
-         WHEN prompt_tokens IS NOT NULL AND completion_tokens IS NOT NULL
-           THEN prompt_tokens * $2 + completion_tokens * $3
-         WHEN tokens IS NOT NULL
-           THEN tokens * ($2 * $4 + $3 * (1 - $4))
-         ELSE estimated_spend_usd
+         WHEN us.prompt_tokens IS NOT NULL AND us.completion_tokens IS NOT NULL
+           THEN us.prompt_tokens * t.in_per_tok + us.completion_tokens * t.out_per_tok
+         WHEN us.tokens IS NOT NULL
+           THEN us.tokens * (t.in_per_tok * $2 + t.out_per_tok * (1 - $2))
+         ELSE us.estimated_spend_usd
        END
-       WHERE model_id = $1 AND provider = ''`,
-      [modelId, inputPerTok, outputPerTok, promptShare],
+       FROM target t
+       WHERE us.model_id = $1 AND us.provider = t.provider AND us.bucket_date = t.bucket_date`,
+      [modelId, promptShare],
     );
     return res.rowCount ?? 0;
   }
