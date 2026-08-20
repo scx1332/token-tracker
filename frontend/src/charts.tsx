@@ -769,6 +769,9 @@ export function IntradayTapeChart({
 }) {
   const data = useMemo<Data[]>(() => {
     const x = rows.map((r) => r.capturedAt);
+    // A week of 15-minute sweeps is ~670 points: per-sweep markers stop being
+    // dots and become a band. Past a few hundred, the line alone reads better.
+    const minMode = rows.length > 300 ? "lines" : "lines+markers";
     return [
       {
         type: "scatter",
@@ -793,7 +796,7 @@ export function IntradayTapeChart({
       },
       {
         type: "scatter",
-        mode: "lines+markers",
+        mode: minMode,
         name: "Cheapest offer",
         x,
         y: rows.map((r) => r.minUsd),

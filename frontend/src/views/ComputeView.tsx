@@ -38,6 +38,13 @@ const TIER_ORDER = ["flagship", "datacenter", "prosumer"];
 /** Days of daily history before the rental-price chart trades sweeps for dailies. */
 const DAILY_MIN_DAYS = 7;
 
+/**
+ * Trailing window on the sweep tape. A week is the whole history for most
+ * accelerators right now (sweeps began 2026-08-13), so this is as far back as
+ * the tape can honestly reach — widen it as history accumulates.
+ */
+const TAPE_HOURS = 168;
+
 /** $/GPU-hour to 3dp — rentals span $0.06 to $10, so a fixed 3 reads cleanly. */
 function gpuHr(v: number | null | undefined): string {
   if (v === null || v === undefined || !Number.isFinite(v)) return "—";
@@ -125,7 +132,7 @@ export function ComputeView({ navigate: _navigate }: { navigate: (to: string) =>
     [comparisonHourly, dailyComparison, snapshots, hourly, metric],
   );
 
-  const tape = useMemo(() => lastWindow(hourly ?? [], 72, Date.now()), [hourly]);
+  const tape = useMemo(() => lastWindow(hourly ?? [], TAPE_HOURS, Date.now()), [hourly]);
 
   const profiles = useMemo(() => {
     const rows = hourly ?? [];
@@ -203,7 +210,9 @@ export function ComputeView({ navigate: _navigate }: { navigate: (to: string) =>
         <Panel className="chart-card">
           <div className="chart-head">
             <div>
-              <div className="chart-title">Last 72 hours — {selectedMeta?.label ?? selected}</div>
+              <div className="chart-title">
+                Last {TAPE_HOURS / 24} days — {selectedMeta?.label ?? selected}
+              </div>
               <div className="chart-note mono">every sweep · price left, supply depth right · UTC</div>
             </div>
           </div>
