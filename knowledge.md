@@ -125,6 +125,36 @@ Cache reads are ~10% of input price almost everywhere, and OpenRouter reports
 unobservable. Effective rates capture the discount in aggregate; per-model
 figures remain ceilings.
 
+### Which day's rate a day is priced at
+
+Each day is priced at the rate that was in force **on that day** — the last
+`effective_price_snapshots` row captured before that day ended, per model and
+per provider (`repriceUsageSpendAsOf`, run by the daily sweep and by
+`scripts/reprice-usage-asof.sql` for models that have dropped out of it).
+
+Until 2026-08-20 it was not. `repriceUsageSpend` stamped the newest rate across
+a model's entire history on every sweep — "today's real paid rate is the best
+estimate for past days too" — which made spend a pure restatement of tokens:
+per model, `spend = tokens × one constant`, so the two series could only part
+company through mix shifts between models, never through a repricing. It was
+caught on the 50% cut to gpt-5.6-sol (2026-08-17): solving `spend = prompt×X +
+completion×Y` on Aug 12 and Aug 19 returned the identical pair, and the five
+pre-discount days had been marked down as though the discount had always been
+there. Sol's Aug 12–16 spend rose ~75% when restated; market-wide the days
+moved between −5% and +7%, because model-level moves partly cancel.
+
+Two limits are inherent, not bugs:
+
+- **Before 2026-08-12 there is no rate history at all** — neither
+  `effective_price_snapshots` nor `price_points` reaches back — so every day
+  from 2026-05-18 to then carries the earliest known rate back, flat. That is
+  most of the series. Repricing history cannot be redone later either: the
+  effective-pricing endpoint only ever reports *now*.
+- **The effective rate is itself a trailing usage-weighted blend**, so it eases
+  into a price change over a day or two rather than stepping on the hour. Sol's
+  input rate read 1.40 on Aug 17, 0.87 on Aug 18, 0.99 on Aug 19 against a
+  discount that landed at once.
+
 **Never present these numbers as billed revenue.** "Estimated" is not a
 disclaimer here, it is the accurate word.
 
