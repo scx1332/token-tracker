@@ -93,6 +93,36 @@ describe("HTTP server (integration)", () => {
     }
   });
 
+  it("filters /models by the provider serving them, whatever the casing", async () => {
+    const { storage, cleanup } = await createIsolatedStorage();
+    const server = createServer(storage, { port: 0, hostname: "127.0.0.1" });
+    const base = `http://127.0.0.1:${server.port}`;
+    try {
+      await seed(storage);
+
+      // The providers board links here with the display-cased name; a
+      // hand-typed link carries whatever the user typed.
+      for (const name of ["DeepInfra", "deepinfra"]) {
+        const hit = await (await fetch(`${base}/models?provider=${name}`)).json();
+        expect(hit.count).toBe(1);
+        expect(hit.models[0].modelId).toBe("z-ai/glm-5.2");
+      }
+
+      // A provider that serves nothing here narrows to nothing — it must not
+      // fall back to the unfiltered board.
+      const miss = await (await fetch(`${base}/models?provider=Nebius`)).json();
+      expect(miss.count).toBe(0);
+
+      // An empty param is no filter at all — not a filter on the model-level
+      // price row, whose provider is stored as "".
+      const empty = await (await fetch(`${base}/models?provider=`)).json();
+      expect(empty.count).toBe(1);
+    } finally {
+      server.stop(true);
+      await cleanup();
+    }
+  });
+
   it("serves /status, and says 503 when the pipeline is not running", async () => {
     const { storage, cleanup } = await createIsolatedStorage();
     const server = createServer(storage, { port: 0, hostname: "127.0.0.1" });

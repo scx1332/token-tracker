@@ -106,7 +106,11 @@ export function App() {
       <main className="container">
         {route.name === "market" && <MarketView navigate={navigate} />}
         {route.name === "explorer" && <ExplorerView modelId={route.id} provider={route.provider} navigate={navigate} />}
-        {route.name === "models" && <ModelsView navigate={navigate} />}
+        {route.name === "models" && (
+          // Keyed by the deep link: /models?provider=… reached from another
+          // /models URL has to reset the board's state, not reuse it.
+          <ModelsView key={`${route.provider ?? ""}|${route.q ?? ""}`} query={route.q} provider={route.provider} navigate={navigate} />
+        )}
         {route.name === "providers" && <ProvidersView navigate={navigate} />}
         {route.name === "compute" && <ComputeView navigate={navigate} />}
         {route.name === "model" && <ModelView modelId={route.id} navigate={navigate} />}
@@ -130,7 +134,7 @@ export function App() {
 type Route =
   | { name: "market" }
   | { name: "explorer"; id?: string; provider?: string }
-  | { name: "models" }
+  | { name: "models"; q?: string; provider?: string }
   | { name: "providers" }
   | { name: "compute" }
   | { name: "model"; id: string };
@@ -151,7 +155,14 @@ function parseRoute(fullPath: string): Route {
     if (provider) route.provider = provider;
     return route;
   }
-  if (path.startsWith("models")) return { name: "models" };
+  if (path.startsWith("models")) {
+    const route: Route = { name: "models" };
+    const q = query.get("q");
+    const provider = query.get("provider");
+    if (q) route.q = q;
+    if (provider) route.provider = provider;
+    return route;
+  }
   if (path.startsWith("providers")) return { name: "providers" };
   if (path.startsWith("compute")) return { name: "compute" };
   return { name: "market" };

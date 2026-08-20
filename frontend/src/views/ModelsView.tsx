@@ -1,15 +1,11 @@
 import { encodeModelId } from "../routes";
 import { useEffect, useMemo, useState } from "react";
-import { api, type ModelWithLatest } from "../api";
-import { Badge, Loading, ErrorNote } from "../components";
+import { api, type ModelWithLatest, type ProviderStat } from "../api";
+import { Badge, Loading, ErrorNote, Empty } from "../components";
 import { perMtok, compact, usd, displayName } from "../format";
 import { isFrontier } from "../frontier";
 
 type SortKey = "tokens" | "spend" | "input" | "output" | "effective" | "released" | "providers" | "name";
-
-function initialQuery(): string {
-  return new URLSearchParams(window.location.search).get("q") ?? "";
-}
 
 /** Release cutoff for the default view: models older than this are noise. */
 const RECENT_MONTHS = 12;
@@ -33,23 +29,50 @@ function releasedMs(m: ModelWithLatest): number | null {
   return Number.isFinite(t) ? t : null;
 }
 
-export function ModelsView({ navigate }: { navigate: (to: string) => void }) {
+export function ModelsView({
+  query: routeQuery,
+  provider,
+  navigate,
+}: {
+  query?: string;
+  provider?: string;
+  navigate: (to: string) => void;
+}) {
   const [models, setModels] = useState<ModelWithLatest[] | null>(null);
+  const [providers, setProviders] = useState<ProviderStat[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [query, setQuery] = useState(initialQuery);
+  const [query, setQuery] = useState(routeQuery ?? "");
   const [onlyPaid, setOnlyPaid] = useState(false);
-  const [onlyFrontier, setOnlyFrontier] = useState(true);
-  const [onlyRecent, setOnlyRecent] = useState(true);
-  const [onlyActive, setOnlyActive] = useState(true);
+  // Pinning a provider is already a narrow slice, and most of what a host
+  // serves is neither frontier nor busy — leaving the noise filters on would
+  // hand back an empty board, so a provider link starts with them off.
+  const [onlyFrontier, setOnlyFrontier] = useState(!provider);
+  const [onlyRecent, setOnlyRecent] = useState(!provider);
+  const [onlyActive, setOnlyActive] = useState(!provider);
   const [sort, setSort] = useState<SortKey>("spend");
   const [dir, setDir] = useState<1 | -1>(-1);
 
   useEffect(() => {
     let alive = true;
+    const params: { limit: number; provider?: string } = { limit: 5000 };
+    if (provider) params.provider = provider;
     api
-      .models({ limit: 5000 })
+      .models(params)
       .then((r) => alive && setModels(r.models))
       .catch((e) => alive && setError(String(e.message ?? e)));
+    return () => {
+      alive = false;
+    };
+  }, [provider]);
+
+  // Only powers the "that's a provider, not a model" hint below — a failure
+  // costs the hint, not the board.
+  useEffect(() => {
+    let alive = true;
+    api
+      .providers()
+      .then((r) => alive && setProviders(r.providers))
+      .catch(() => {});
     return () => {
       alive = false;
     };
@@ -90,6 +113,14 @@ export function ModelsView({ navigate }: { navigate: (to: string) => void }) {
     });
     return list;
   }, [models, query, onlyPaid, onlyFrontier, onlyRecent, onlyActive, sort, dir]);
+
+  // "nebius" is a provider, not a model, so the model search comes back empty.
+  // Rather than leave that as a dead end, offer the board that does exist.
+  const providerHint = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (provider || !providers || !q) return null;
+    return providers.find((p) => p.provider.toLowerCase() === q) ?? null;
+  }, [provider, providers, query]);
 
   if (error) return <ErrorNote error={error} />;
   if (!models) return <Loading label="Loading model book…" />;
@@ -140,6 +171,33 @@ export function ModelsView({ navigate }: { navigate: (to: string) => void }) {
         <span className="count-note mono">{rows.length} models</span>
       </div>
 
+      {(provider || providerHint) && (
+        <div className="chip-row" style={{ marginBottom: 12 }}>
+          {provider && (
+            <button className="chip active" onClick={() => navigate("/models")} title="Clear the provider filter">
+              Served by {provider} ×
+            </button>
+          )}
+          {providerHint && (
+            <button
+              className="chip"
+              onClick={() => navigate(`/models?provider=${encodeURIComponent(providerHint.provider)}`)}
+            >
+              {providerHint.provider} is a provider, not a model — show the {providerHint.modelCount} models it serves →
+            </button>
+          )}
+        </div>
+      )}
+
+      {rows.length === 0 ? (
+        <Empty
+          label={
+            provider
+              ? `No models served by ${provider} match these filters.`
+              : "No models match this search and filter set."
+          }
+        />
+      ) : (
       <div className="table-wrap">
         <table className="tt">
           <thead>
@@ -182,6 +240,7 @@ export function ModelsView({ navigate }: { navigate: (to: string) => void }) {
           </tbody>
         </table>
       </div>
+      )}
       {rows.length > 600 && (
         <div className="count-note mono" style={{ marginTop: 10 }}>
           Showing top 600 of {rows.length}. Refine with search.

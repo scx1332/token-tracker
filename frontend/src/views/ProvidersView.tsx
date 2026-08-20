@@ -409,7 +409,7 @@ function PriceBook({ stats, navigate }: { stats: ProviderStat[]; navigate: (to: 
         </thead>
         <tbody>
           {rows.map((p) => (
-            <tr key={p.provider} onClick={() => navigate(`/models?q=${encodeURIComponent(p.provider.toLowerCase())}`)}>
+            <tr key={p.provider} onClick={() => navigate(`/models?provider=${encodeURIComponent(p.provider)}`)}>
               <td className="left" style={{ fontFamily: "var(--font-body)", fontWeight: 500 }}>{p.provider}</td>
               <td>
                 <div style={{ display: "flex", alignItems: "center", gap: 10, justifyContent: "flex-end" }}>

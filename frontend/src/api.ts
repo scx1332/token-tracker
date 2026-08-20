@@ -290,10 +290,11 @@ export const api = {
   /** Just the market-wide daily totals — the cheap half of /market. */
   marketSeries: (days = 120, includeFree = false) =>
     get<{ series: UsageSeriesPoint[] }>(`/market/series?days=${days}${includeFree ? "&includeFree=true" : ""}`),
-  models: (params: { search?: string; author?: string; limit?: number } = {}) => {
+  models: (params: { search?: string; author?: string; provider?: string; limit?: number } = {}) => {
     const q = new URLSearchParams();
     if (params.search) q.set("search", params.search);
     if (params.author) q.set("author", params.author);
+    if (params.provider) q.set("provider", params.provider);
     if (params.limit) q.set("limit", String(params.limit));
     const qs = q.toString();
     return get<{ count: number; models: ModelWithLatest[] }>(`/models${qs ? `?${qs}` : ""}`);

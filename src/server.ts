@@ -257,14 +257,16 @@ export function createServer(storage: Storage, options: ServerOptions) {
   }
 
   async function handleModels(q: URLSearchParams): Promise<Response> {
-    const filter: { activeOnly?: boolean; author?: string; search?: string; limit?: number } = {
+    const filter: { activeOnly?: boolean; author?: string; search?: string; provider?: string; limit?: number } = {
       activeOnly: q.get("all") !== "true",
       limit: limitFromParams(q, 1000, 5000),
     };
     const author = q.get("author");
     const search = q.get("search");
+    const provider = q.get("provider");
     if (author) filter.author = author;
     if (search) filter.search = search;
+    if (provider) filter.provider = provider;
     const models = await storage.getModelsWithLatest(filter);
     return json({ count: models.length, models });
   }

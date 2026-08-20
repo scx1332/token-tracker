@@ -606,7 +606,9 @@ export class Storage {
     return { total: Number(row?.total ?? 0), active: Number(row?.active ?? 0) };
   }
 
-  async getModelsWithLatest(filter: { activeOnly?: boolean; author?: string; search?: string; modelId?: string; limit?: number } = {}): Promise<ModelWithLatest[]> {
+  async getModelsWithLatest(
+    filter: { activeOnly?: boolean; author?: string; search?: string; provider?: string; modelId?: string; limit?: number } = {},
+  ): Promise<ModelWithLatest[]> {
     const clauses: string[] = [];
     const params: unknown[] = [];
     if (filter.activeOnly) clauses.push("m.is_active = TRUE");
@@ -621,6 +623,15 @@ export class Storage {
     if (filter.search) {
       params.push(`%${filter.search.toLowerCase()}%`);
       clauses.push(`(LOWER(m.model_id) LIKE $${params.length} OR LOWER(m.name) LIKE $${params.length})`);
+    }
+    if (filter.provider) {
+      // Provider names are stored display-cased ("Nebius"), and links may carry
+      // either casing — match case-insensitively on any endpoint of the model.
+      params.push(filter.provider.toLowerCase());
+      clauses.push(
+        `EXISTS (SELECT 1 FROM ${this.t("price_points")} pp3
+                 WHERE pp3.model_id = m.model_id AND LOWER(pp3.provider) = $${params.length})`,
+      );
     }
     const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
     params.push(resolveLimit(filter.limit));
