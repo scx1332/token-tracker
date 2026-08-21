@@ -1,8 +1,8 @@
 import { encodeModelId } from "../routes";
 import { useEffect, useMemo, useState } from "react";
-import { api, type HealthResponse, type MarketResponse } from "../api";
+import { api, type HealthResponse, type MarketResponse, type RacePoint } from "../api";
 import { Kpi, Panel, SectionHead, RankList, Loading, ErrorNote, type RankItem } from "../components";
-import { SpendTokensChart, PriceIndexChart, WeeklyBarsChart, WeeklyRaceChart, ComputeVsTokensChart, C } from "../charts";
+import { SpendTokensChart, PriceIndexChart, WeeklyBarsChart, ModelRaceChart, ComputeVsTokensChart, C } from "../charts";
 import { usd, usdExact, compact, mtok, relTime, seriesChange, displayName, pct, shortDate } from "../format";
 import { forecastCurrentWeek, toWeeklyBuckets, trimLeadingPartial } from "../weekly";
 import { closedOnly, isClosedDay } from "../runningDay";
@@ -19,6 +19,11 @@ export function MarketView({ navigate }: { navigate: (to: string) => void }) {
   const [error, setError] = useState<string | null>(null);
   // Price × volume is the market-share signal that matters, so spend leads.
   const [raceMode, setRaceMode] = useState<"spend" | "tokens">("spend");
+  // Weeks lead the race: a single day swings ~20% on weekday alone, so the
+  // trend reads cleaner. Days are one click away for anyone chasing a launch.
+  const [raceBucket, setRaceBucket] = useState<"week" | "day">("week");
+  const [dailyRace, setDailyRace] = useState<{ key: string; points: RacePoint[] } | null>(null);
+  const [dailyRaceError, setDailyRaceError] = useState<string | null>(null);
   const [weekMode, setWeekMode] = useState<"spend" | "tokens" | "both">("both");
   const [indexMode, setIndexMode] = useState<"price" | "compute">("price");
   // Apps default to the same day the model leaderboard shows, not the month.
@@ -51,6 +56,23 @@ export function MarketView({ navigate }: { navigate: (to: string) => void }) {
       alive = false;
     };
   }, [includeFree]);
+
+  // The daily race is ~7x the weekly payload, so it stays off the first load
+  // and is fetched the first time the grain is switched — then kept, keyed by
+  // the free-tier filter, so flipping back and forth costs nothing.
+  const raceKey = includeFree ? "all" : "paid";
+  useEffect(() => {
+    if (raceBucket !== "day" || dailyRace?.key === raceKey) return;
+    let alive = true;
+    setDailyRaceError(null);
+    api
+      .race({ bucket: "day", includeFree })
+      .then((r) => alive && setDailyRace({ key: raceKey, points: r.points }))
+      .catch((e) => alive && setDailyRaceError(String(e.message ?? e)));
+    return () => {
+      alive = false;
+    };
+  }, [raceBucket, raceKey, dailyRace, includeFree]);
 
   const computeComparison = useMemo(
     () => buildComparison(market?.priceIndex ?? [], gpuDaily, "medianUsd"),
@@ -111,6 +133,16 @@ export function MarketView({ navigate }: { navigate: (to: string) => void }) {
     prevValue && prevValue > 0 && weekValue(lastFullWeek) !== null
       ? (weekValue(lastFullWeek)! - prevValue) / prevValue
       : null;
+
+  // Whichever grain is showing, clipped to the window the race covers. Daily
+  // points are absent until their fetch lands — and while the free-tier filter
+  // is being changed, the cached ones belong to the *other* filter, so they
+  // don't count either.
+  const freshDailyRace = dailyRace?.key === raceKey ? dailyRace.points : null;
+  const racePoints = (raceBucket === "week" ? market.race.points : freshDailyRace ?? []).filter(
+    (p) => p.date >= RACE_SINCE,
+  );
+  const raceLoading = raceBucket === "day" && freshDailyRace === null && !dailyRaceError;
 
   const priceIndexChange = seriesChange(weightedSeries);
   const spendChange = seriesChange(spendSeries.slice(-14));
@@ -433,27 +465,51 @@ export function MarketView({ navigate }: { navigate: (to: string) => void }) {
             <div>
               <div className="chart-title">The model race</div>
               <div className="chart-note">
-                {raceMode === "spend" ? "weekly est. spend" : "weekly tokens"} · full weeks · top 10 · since Jun 15
+                {raceMode === "spend" ? "est. spend" : "tokens"} per {raceBucket} ·{" "}
+                {raceBucket === "week" ? "full weeks only" : "one point per day"} · top 10 · since{" "}
+                {shortDate(RACE_SINCE)}
               </div>
             </div>
-            <div className="seg seg-sm">
-              <button className={raceMode === "spend" ? "active" : ""} onClick={() => setRaceMode("spend")}>
-                Est. spend
-              </button>
-              <button className={raceMode === "tokens" ? "active" : ""} onClick={() => setRaceMode("tokens")}>
-                Tokens
-              </button>
+            <div className="seg-row">
+              <div className="seg seg-sm">
+                <button className={raceMode === "spend" ? "active" : ""} onClick={() => setRaceMode("spend")}>
+                  Est. spend
+                </button>
+                <button className={raceMode === "tokens" ? "active" : ""} onClick={() => setRaceMode("tokens")}>
+                  Tokens
+                </button>
+              </div>
+              <div className="seg seg-sm">
+                <button
+                  className={raceBucket === "week" ? "active" : ""}
+                  onClick={() => setRaceBucket("week")}
+                  title="Full ISO weeks — the trend, with weekday noise summed out"
+                >
+                  Weekly
+                </button>
+                <button
+                  className={raceBucket === "day" ? "active" : ""}
+                  onClick={() => setRaceBucket("day")}
+                  title="One point per day — noisier, but a launch lands on the day it happened"
+                >
+                  Daily
+                </button>
+              </div>
             </div>
           </div>
-          {market.race.points.filter((p) => p.date >= RACE_SINCE).length > 1 ? (
-            <WeeklyRaceChart
-              points={market.race.points.filter((p) => p.date >= RACE_SINCE)}
-              height={300}
-              topN={10}
-              mode={raceMode}
-            />
+          {raceLoading ? (
+            // Hold the plot's height so switching grain doesn't bounce the row.
+            <div style={{ height: 300, display: "grid", placeItems: "center" }}>
+              <Loading label="Loading daily race…" />
+            </div>
+          ) : dailyRaceError && raceBucket === "day" ? (
+            <div className="empty" style={{ padding: "40px 10px" }}>Daily race unavailable — {dailyRaceError}</div>
+          ) : racePoints.length > 1 ? (
+            <ModelRaceChart points={racePoints} height={300} topN={10} mode={raceMode} bucket={raceBucket} />
           ) : (
-            <div className="empty" style={{ padding: "40px 10px" }}>No weekly history yet.</div>
+            <div className="empty" style={{ padding: "40px 10px" }}>
+              No {raceBucket === "week" ? "weekly" : "daily"} history yet.
+            </div>
           )}
         </Panel>
       </div>

@@ -40,8 +40,9 @@ function excludeFreeFromParams(params: URLSearchParams): boolean {
 }
 
 /** Race window: ~13 full weeks of our own daily snapshots (coverage is ~90d). */
-function raceSince(): string {
-  return new Date(Date.now() - 13 * 7 * 86_400_000).toISOString().slice(0, 10);
+const RACE_DAYS = 13 * 7;
+function raceSince(days = RACE_DAYS): string {
+  return new Date(Date.now() - days * 86_400_000).toISOString().slice(0, 10);
 }
 
 function limitFromParams(params: URLSearchParams, def: number, max: number): number {
@@ -85,6 +86,8 @@ export function createServer(storage: Storage, options: ServerOptions) {
         });
       case "/market/snapshots":
         return json({ snapshots: await storage.getMarketSnapshots({ since: sinceFromParams(q, 120) }) });
+      case "/market/race":
+        return handleRace(q);
       case "/models":
         return handleModels(q);
       case "/models/featured":
@@ -241,7 +244,7 @@ export function createServer(storage: Storage, options: ServerOptions) {
       readKvJson("apps_spend"),
       readKvJson("weekly_chart"),
       storage.getModelsWithLatest({ limit: 5000 }),
-      storage.getWeeklyModelRace({ since: raceSince(), excludeFree }),
+      storage.getModelRace({ since: raceSince(), bucket: "week", excludeFree }),
     ]);
     return json({
       latest,
@@ -254,6 +257,24 @@ export function createServer(storage: Storage, options: ServerOptions) {
       race: { points: race },
       ratesByPermaslug: buildRateByPermaslug(allModels),
     });
+  }
+
+  /**
+   * The model race at either grain. `/market` already ships the weekly points,
+   * so this exists for the daily ones: same window at day resolution is ~7x the
+   * rows, which is a lot of payload to put on every first page load for a view
+   * most visitors never open. The UI fetches it when the grain is switched.
+   */
+  async function handleRace(q: URLSearchParams): Promise<Response> {
+    const daysRaw = q.get("days");
+    const days = daysRaw && /^\d+$/.test(daysRaw) ? Math.min(Number(daysRaw), 800) : RACE_DAYS;
+    const bucket = q.get("bucket") === "day" ? "day" : "week";
+    const points = await storage.getModelRace({
+      since: raceSince(days),
+      bucket,
+      excludeFree: excludeFreeFromParams(q),
+    });
+    return json({ bucket, points });
   }
 
   async function handleModels(q: URLSearchParams): Promise<Response> {

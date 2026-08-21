@@ -93,6 +93,7 @@ export interface WeeklyPoint {
 }
 
 export interface RacePoint {
+  /** Bucket start: the Monday of an ISO week, or the day itself. */
   date: string;
   spendByModel: Record<string, number>;
   tokensByModel: Record<string, number>;
@@ -112,9 +113,10 @@ export interface MarketResponse {
     apps: AppSpendRow[];
   } | null;
   weekly: { points: WeeklyPoint[]; updatedAt?: string };
-  /** Full-week per-model spend/tokens from our own daily snapshots. */
+  /** Full-week per-model spend/tokens from our own daily snapshots. Day-grain
+   * points are the same shape, fetched on demand from `api.race`. */
   race: { points: RacePoint[] };
-  /** Effective $/token per permaslug — prices the weekly race by est. spend. */
+  /** Effective $/token per permaslug — prices the race by est. spend. */
   ratesByPermaslug?: Record<string, number>;
 }
 
@@ -321,4 +323,17 @@ export const api = {
   },
   /** Hourly market snapshots — the token side's intraday series. */
   marketSnapshots: (days = 14) => get<{ snapshots: MarketRow[] }>(`/market/snapshots?days=${days}`),
+  /**
+   * The model race on its own. `/market` already carries the weekly points, so
+   * this is really for the daily grain — same window, ~7x the rows, so it is
+   * kept off the first page load and fetched when the grain is switched.
+   */
+  race: (params: { bucket?: "week" | "day"; days?: number; includeFree?: boolean } = {}) => {
+    const q = new URLSearchParams();
+    if (params.bucket) q.set("bucket", params.bucket);
+    if (params.days) q.set("days", String(params.days));
+    if (params.includeFree) q.set("includeFree", "true");
+    const qs = q.toString();
+    return get<{ bucket: "week" | "day"; points: RacePoint[] }>(`/market/race${qs ? `?${qs}` : ""}`);
+  },
 };

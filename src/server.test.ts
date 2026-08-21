@@ -123,6 +123,47 @@ describe("HTTP server (integration)", () => {
     }
   });
 
+  it("serves the model race at both grains", async () => {
+    const { storage, cleanup } = await createIsolatedStorage();
+    const server = createServer(storage, { port: 0, hostname: "127.0.0.1" });
+    const base = `http://127.0.0.1:${server.port}`;
+    try {
+      // Dates relative to now, not the seed's fixed month: the race window is
+      // the trailing ~13 weeks, so hard-coded days would silently fall out of
+      // it as real time moves on. 21 consecutive days ending yesterday — no
+      // running day, and always at least two complete Mon–Sun weeks inside.
+      const day = (back: number) => new Date(Date.now() - back * 86_400_000).toISOString().slice(0, 10);
+      const days = Array.from({ length: 21 }, (_, i) => day(21 - i));
+      await storage.upsertUsageBatch(
+        days.map((bucketDate) => ({
+          modelId: "z-ai/glm-5.2", provider: "", bucketDate, tokens: 1000,
+          promptTokens: null, completionTokens: null, requests: null, estimatedSpendUsd: 2, source: "rankings",
+        })),
+        { onConflict: "update" },
+      );
+
+      const weekly = await (await fetch(`${base}/market/race`)).json();
+      expect(weekly.bucket).toBe("week");
+      expect(weekly.points.length).toBeGreaterThanOrEqual(2);
+      // Every week that survives the partial-week cut is a whole one: 7 x $2.
+      for (const p of weekly.points) expect(p.spendByModel["z-ai/glm-5.2"]).toBe(14);
+
+      const daily = await (await fetch(`${base}/market/race?bucket=day`)).json();
+      expect(daily.bucket).toBe("day");
+      expect(daily.points).toHaveLength(days.length); // partial weeks included
+      expect(daily.points.map((p: { date: string }) => p.date)).toEqual(days);
+      expect(daily.points[0].spendByModel["z-ai/glm-5.2"]).toBe(2);
+
+      // An unknown grain reads as the weekly default rather than erroring.
+      const fallback = await (await fetch(`${base}/market/race?bucket=fortnight`)).json();
+      expect(fallback.bucket).toBe("week");
+      expect(fallback.points).toEqual(weekly.points);
+    } finally {
+      server.stop(true);
+      await cleanup();
+    }
+  });
+
   it("serves /status, and says 503 when the pipeline is not running", async () => {
     const { storage, cleanup } = await createIsolatedStorage();
     const server = createServer(storage, { port: 0, hostname: "127.0.0.1" });

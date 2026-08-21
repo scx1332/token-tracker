@@ -1252,20 +1252,36 @@ export class Storage {
   }
 
   /**
-   * Weekly per-model spend/tokens from our own daily snapshots — the honest
+   * Per-model spend/tokens over time from our own daily snapshots — the honest
    * "model race" source. OpenRouter's weekly rankings chart names only each
    * week's top-10 by tokens and folds the rest into "Others", which silently
-   * drops expensive lower-volume models. Only full ISO weeks are returned
-   * (the in-progress week would read as a crash), limited to the union of the
-   * window's top `topN` models by spend and by tokens.
+   * drops expensive lower-volume models.
+   *
+   * `bucket` picks the grain, and the two answer different questions. Weeks
+   * are the trend line: only full ISO weeks are returned, because the week in
+   * progress is always short and would read as a crash. Days are the same
+   * money unsmoothed — every bucket the feed has published, one point each,
+   * including the day still filling if one has landed (shown and marked by the
+   * chart, never averaged — see frontend/src/runningDay.ts). A day swings hard
+   * on which weekday it is, so days show a launch or a routing switch the week
+   * bars would blur; weeks are what to read for direction.
+   *
+   * Either grain keeps the union of the window's top `topN` models by spend
+   * and by tokens, so an expensive low-volume model still gets a line.
    */
-  async getWeeklyModelRace(filter: { since: string; topN?: number; excludeFree?: boolean }): Promise<
-    { date: string; spendByModel: Record<string, number>; tokensByModel: Record<string, number> }[]
-  > {
+  async getModelRace(filter: {
+    since: string;
+    bucket?: "week" | "day";
+    topN?: number;
+    excludeFree?: boolean;
+  }): Promise<{ date: string; spendByModel: Record<string, number>; tokensByModel: Record<string, number> }[]> {
+    const grain = filter.bucket ?? "week";
     const topN = Math.min(Math.max(1, filter.topN ?? 14), 40);
     const freeClause = filter.excludeFree ? ` AND ${this.notFreeSql("us")}` : "";
+    // Days need no truncation: bucket_date already is the bucket.
+    const bucketSql = grain === "day" ? "us.bucket_date" : "date_trunc('week', us.bucket_date)::date";
     const result = await this.pool.query(
-      `SELECT date_trunc('week', us.bucket_date)::date AS week,
+      `SELECT ${bucketSql} AS bucket_start,
               us.model_id,
               SUM(us.tokens) AS tokens,
               SUM(us.estimated_spend_usd) AS spend,
@@ -1279,31 +1295,31 @@ export class Storage {
 
     const totalSpend = new Map<string, number>();
     const totalTokens = new Map<string, number>();
-    const daysPerWeek = new Map<string, number>();
+    const daysPerBucket = new Map<string, number>();
     for (const row of result.rows) {
-      const week = toDateString(row.week);
+      const date = toDateString(row.bucket_start);
       const days = Number(row.days ?? 0);
-      daysPerWeek.set(week, Math.max(daysPerWeek.get(week) ?? 0, days));
+      daysPerBucket.set(date, Math.max(daysPerBucket.get(date) ?? 0, days));
       totalSpend.set(row.model_id, (totalSpend.get(row.model_id) ?? 0) + (num(row.spend) ?? 0));
       totalTokens.set(row.model_id, (totalTokens.get(row.model_id) ?? 0) + (num(row.tokens) ?? 0));
     }
     const rank = (m: Map<string, number>) => [...m.entries()].sort((a, b) => b[1] - a[1]).slice(0, topN).map(([k]) => k);
     const keep = new Set([...rank(totalSpend), ...rank(totalTokens)]);
 
-    const byWeek = new Map<string, { spendByModel: Record<string, number>; tokensByModel: Record<string, number> }>();
+    const byBucket = new Map<string, { spendByModel: Record<string, number>; tokensByModel: Record<string, number> }>();
     for (const row of result.rows) {
-      const week = toDateString(row.week);
-      if ((daysPerWeek.get(week) ?? 0) < 7) continue; // partial week
+      const date = toDateString(row.bucket_start);
+      if (grain === "week" && (daysPerBucket.get(date) ?? 0) < 7) continue; // partial week
       if (!keep.has(row.model_id)) continue;
-      let bucket = byWeek.get(week);
-      if (!bucket) {
-        bucket = { spendByModel: {}, tokensByModel: {} };
-        byWeek.set(week, bucket);
+      let point = byBucket.get(date);
+      if (!point) {
+        point = { spendByModel: {}, tokensByModel: {} };
+        byBucket.set(date, point);
       }
-      bucket.spendByModel[row.model_id] = num(row.spend) ?? 0;
-      bucket.tokensByModel[row.model_id] = num(row.tokens) ?? 0;
+      point.spendByModel[row.model_id] = num(row.spend) ?? 0;
+      point.tokensByModel[row.model_id] = num(row.tokens) ?? 0;
     }
-    return [...byWeek.entries()].map(([date, maps]) => ({ date, ...maps }));
+    return [...byBucket.entries()].map(([date, maps]) => ({ date, ...maps }));
   }
 
   /** Top models by estimated spend on the most recent day, with names + prices. */

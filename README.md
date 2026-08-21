@@ -123,6 +123,7 @@ All endpoints are JSON, CORS‑enabled, served under `/api` by nginx.
 | `GET /gpu/series?gpu=B200&days=30` | per-sweep GPU price bands (omit `gpu` for all; sub-hourly) |
 | `GET /gpu/daily?gpu=B200&days=60` | UTC-day aggregates, rolled up in SQL |
 | `GET /market/snapshots?days=14` | hourly market snapshots — the token side's intraday series |
+| `GET /market/race?bucket=week\|day&days=91` | per‑model spend/tokens over time — the model race. `/market` already carries the weekly points; the daily grain is ~7× the rows, so it is fetched here on demand |
 
 ## Local development
 

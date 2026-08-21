@@ -225,6 +225,52 @@ describe("Storage (integration)", () => {
     }
   });
 
+  it("races models weekly and daily off the same snapshots", async () => {
+    const { storage, cleanup } = await createIsolatedStorage();
+    try {
+      await storage.upsertModel(sampleModel("z-ai/glm-5.2", "z-ai/glm-5.2-x"));
+      await storage.upsertModel(sampleModel("openai/gpt-5.6-luna", "openai/gpt-5.6-luna-x"));
+      // Aug 3 and Aug 10 are Mondays; the week of Aug 17 gets two days only, so
+      // it is partial and must not reach the weekly grain.
+      const days: string[] = [];
+      for (let d = 3; d <= 18; d++) days.push(`2026-08-${String(d).padStart(2, "0")}`);
+      await storage.upsertUsageBatch(
+        days.flatMap((bucketDate) => [
+          // Volume model: cheap tokens, lots of them.
+          { modelId: "z-ai/glm-5.2", provider: "", bucketDate, tokens: 1000, promptTokens: null, completionTokens: null, requests: null, estimatedSpendUsd: 1, source: "rankings" },
+          // Premium model: a tenth of the tokens at ten times the money — it
+          // only survives the cut because the field is ranked by both.
+          { modelId: "openai/gpt-5.6-luna", provider: "", bucketDate, tokens: 100, promptTokens: null, completionTokens: null, requests: null, estimatedSpendUsd: 10, source: "rankings" },
+        ]),
+        { onConflict: "update" },
+      );
+
+      const weekly = await storage.getModelRace({ since: "2026-08-01", bucket: "week" });
+      expect(weekly.map((p) => p.date)).toEqual(["2026-08-03", "2026-08-10"]); // Aug 17 is partial
+      expect(weekly[0]!.tokensByModel["z-ai/glm-5.2"]).toBe(7000);
+      expect(weekly[0]!.spendByModel["openai/gpt-5.6-luna"]).toBe(70);
+
+      const daily = await storage.getModelRace({ since: "2026-08-01", bucket: "day" });
+      expect(daily).toHaveLength(days.length); // every day, partial week included
+      expect(daily[0]!.date).toBe("2026-08-03");
+      expect(daily[daily.length - 1]!.date).toBe("2026-08-18");
+      expect(daily[0]!.tokensByModel["z-ai/glm-5.2"]).toBe(1000);
+      expect(daily[0]!.spendByModel["openai/gpt-5.6-luna"]).toBe(10);
+
+      // Same money either way: the daily points sum back to the week's.
+      const firstWeek = daily.filter((p) => p.date <= "2026-08-09");
+      const summed = firstWeek.reduce((acc, p) => acc + (p.spendByModel["z-ai/glm-5.2"] ?? 0), 0);
+      expect(summed).toBe(weekly[0]!.spendByModel["z-ai/glm-5.2"]!);
+
+      // topN cuts the field, and it is a union of both rankings — the premium
+      // model wins on spend, the volume model on tokens, so 1 keeps both.
+      const cut = await storage.getModelRace({ since: "2026-08-01", bucket: "day", topN: 1 });
+      expect(Object.keys(cut[0]!.spendByModel).sort()).toEqual(["openai/gpt-5.6-luna", "z-ai/glm-5.2"]);
+    } finally {
+      await cleanup();
+    }
+  });
+
   it("refresh-own restates the same source's rows and spares everyone else's", async () => {
     const { storage, cleanup } = await createIsolatedStorage();
     try {

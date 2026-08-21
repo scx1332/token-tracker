@@ -1104,25 +1104,35 @@ export function UsageHistoryChart({
 const RACE_COLORS = [C.min, C.teal, C.amber, C.up, C.down, C.violet, "#a83c8f", "#5b7ea8", "#8a6a1f", "#2f8f9a"];
 
 export type RaceMode = "spend" | "tokens";
+export type RaceBucket = "week" | "day";
 
 /**
- * Weekly race for the top models, built from our own daily snapshots (real
- * per-model est. spend summed per full week — no "Others" bucket, no top-10
- * membership dropouts). Default mode ranks by **weekly spend**; a tokens mode
- * is kept as the secondary view.
+ * The race for the top models, built from our own daily snapshots (real
+ * per-model est. spend — no "Others" bucket, no top-10 membership dropouts).
+ * Default mode ranks by **spend**; a tokens mode is kept as the secondary view.
+ *
+ * `bucket` only changes what one point means — full ISO weeks, or single days.
+ * The daily series is the noisier read (weekday seasonality is worth ~20% on
+ * its own) but it is where a launch or a routing switch actually shows up, on
+ * the day it happened rather than smeared across a week bar.
  */
-export function WeeklyRaceChart({
+export function ModelRaceChart({
   points,
   height = 300,
   topN = 10,
   mode = "spend",
+  bucket = "week",
+  nowMs = Date.now(),
 }: {
   points: { date: string; spendByModel: Record<string, number>; tokensByModel: Record<string, number> }[];
   height?: number;
   topN?: number;
   mode?: RaceMode;
+  bucket?: RaceBucket;
+  nowMs?: number;
 }) {
   const { data } = useMemo(() => {
+    const dateLabel = bucket === "week" ? "week of %{x|%b %-d}" : "%{x|%b %-d}";
     const values = (p: (typeof points)[number]) => (mode === "spend" ? p.spendByModel : p.tokensByModel) ?? {};
 
     const totals = new Map<string, number>();
@@ -1142,14 +1152,24 @@ export function WeeklyRaceChart({
         const v = values(p)[modelId];
         return v == null ? null : Number(v) || 0;
       }),
-      line: { color: RACE_COLORS[i % RACE_COLORS.length], width: 1.8 },
+      line: { color: RACE_COLORS[i % RACE_COLORS.length], width: bucket === "week" ? 1.8 : 1.4 },
       hovertemplate:
         mode === "spend"
-          ? `${shortSlug(modelId)}: $%{y:.3s}<extra></extra>`
-          : `${shortSlug(modelId)}: %{y:.3s}<extra></extra>`,
+          ? `${shortSlug(modelId)}: $%{y:.3s} · ${dateLabel}<extra></extra>`
+          : `${shortSlug(modelId)}: %{y:.3s} tok · ${dateLabel}<extra></extra>`,
     }));
     return { data: traces };
-  }, [points, topN, mode]);
+  }, [points, topN, mode, bucket]);
+
+  // Ten lines cannot each grow a dotted tail without doubling the legend and
+  // the hover stack, so the day in progress gets the shaded band alone — the
+  // same call ProviderRevenueChart makes. Weeks never need it: partial weeks
+  // are dropped server-side.
+  const marks = useMemo(() => {
+    if (bucket !== "day") return {};
+    const dates = points.map((p) => p.date);
+    return runningDayMarks(dates, runningIndex(dates, nowMs));
+  }, [points, bucket, nowMs]);
 
   const layout = baseLayout({
     height,
@@ -1167,6 +1187,7 @@ export function WeeklyRaceChart({
       ...(mode === "spend" ? { tickprefix: "$" } : {}),
       tickfont: { family: FONT, color: C.tick, size: 10 },
     },
+    ...marks,
   });
   return <Plot data={data} layout={layout} config={baseConfig} className="plot" style={{ width: "100%", height }} useResizeHandler />;
 }

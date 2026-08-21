@@ -899,6 +899,15 @@ table.tt tbody tr:last-child td {
   padding: 4px 9px;
 }
 
+/* Two segmented controls in one chart head — wraps rather than squeezing the
+   title when the panel is narrow. */
+.seg-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
 .count-note {
   margin-left: auto;
   font-family: var(--font-body);
