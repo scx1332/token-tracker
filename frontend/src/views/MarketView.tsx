@@ -416,8 +416,8 @@ export function MarketView({ navigate }: { navigate: (to: string) => void }) {
         />
       </div>
 
-      {/* Price index + weekly race */}
-      <div className="grid chart-grid" style={{ marginTop: 16 }}>
+      {/* Price index — solo now that the race sits below on its own row */}
+      <div style={{ marginTop: 16 }}>
         <Panel className="chart-card">
           <div className="chart-head">
             <div>
@@ -466,6 +466,11 @@ export function MarketView({ navigate }: { navigate: (to: string) => void }) {
             </div>
           )}
         </Panel>
+      </div>
+
+      {/* Model race — full width so ten lines (or five grouped bars per bucket)
+          have room to spread out and legends can wrap without stealing plot */}
+      <div style={{ marginTop: 16 }}>
         <Panel className="chart-card">
           <div className="chart-head">
             <div>
@@ -521,7 +526,7 @@ export function MarketView({ navigate }: { navigate: (to: string) => void }) {
           </div>
           {raceLoading ? (
             // Hold the plot's height so switching grain doesn't bounce the row.
-            <div style={{ height: 300, display: "grid", placeItems: "center" }}>
+            <div style={{ height: 380, display: "grid", placeItems: "center" }}>
               <Loading label="Loading daily race…" />
             </div>
           ) : dailyRaceError && raceBucket === "day" ? (
@@ -529,7 +534,7 @@ export function MarketView({ navigate }: { navigate: (to: string) => void }) {
           ) : racePoints.length > 1 ? (
             <ModelRaceChart
               points={racePoints}
-              height={300}
+              height={380}
               topN={raceStyle === "bar" ? 5 : 10}
               mode={raceMode}
               bucket={raceBucket}
