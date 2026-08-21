@@ -25,9 +25,11 @@ export function MarketView({ navigate }: { navigate: (to: string) => void }) {
   // one anyone can eyeball from a daily line just as easily. Weeks are still a
   // click away for anyone who wants the weekday noise summed out.
   const [raceBucket, setRaceBucket] = useState<"week" | "day">("day");
-  // Lines carry ten models cleanly; bars are the "who moved today" read, so a
-  // tighter top-five field fits without squishing.
-  const [raceStyle, setRaceStyle] = useState<"line" | "bar">("line");
+  // Stacked lab bars lead: one bar per provider family with its models
+  // stacked inside is the "who moved the money" read at a glance, and the
+  // stack absorbs a wider model field than lines can carry. Lines stay a
+  // click away for following individual trends.
+  const [raceStyle, setRaceStyle] = useState<"line" | "bar">("bar");
   const [dailyRace, setDailyRace] = useState<{ key: string; points: RacePoint[] } | null>(null);
   const [dailyRaceError, setDailyRaceError] = useState<string | null>(null);
   const [weekMode, setWeekMode] = useState<"spend" | "tokens" | "both">("both");
@@ -485,8 +487,8 @@ export function MarketView({ navigate }: { navigate: (to: string) => void }) {
               <div className="chart-title">The model race</div>
               <div className="chart-note">
                 {raceMode === "spend" ? "est. spend" : "tokens"} per {raceBucket} ·{" "}
-                {raceBucket === "week" ? "full weeks only" : "one point per day"} · top{" "}
-                {raceStyle === "bar" ? 5 : 10} ·{" "}
+                {raceBucket === "week" ? "full weeks only" : "one point per day"} ·{" "}
+                {raceStyle === "bar" ? "top 12, one bar per lab" : "top 10"} ·{" "}
                 {/* The field is ranked over exactly what's drawn, so the note
                     names the drawn window rather than the fetched one. */}
                 {raceClipsToRecent
@@ -530,9 +532,9 @@ export function MarketView({ navigate }: { navigate: (to: string) => void }) {
                 <button
                   className={raceStyle === "bar" ? "active" : ""}
                   onClick={() => setRaceStyle("bar")}
-                  title="Top 5 as grouped bars per bucket — the discrete-comparison read"
+                  title="One stacked bar per lab — Anthropic, OpenAI, X.AI, Z.AI, Others — with each lab's models stacked inside it"
                 >
-                  Bars · top 5
+                  Bars · by lab
                 </button>
               </div>
             </div>
@@ -548,7 +550,7 @@ export function MarketView({ navigate }: { navigate: (to: string) => void }) {
             <ModelRaceChart
               points={racePoints}
               height={380}
-              topN={raceStyle === "bar" ? 5 : 10}
+              topN={raceStyle === "bar" ? 12 : 10}
               mode={raceMode}
               bucket={raceBucket}
               style={raceStyle}

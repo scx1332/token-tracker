@@ -1103,6 +1103,29 @@ export function UsageHistoryChart({
 
 const RACE_COLORS = [C.min, C.teal, C.amber, C.up, C.down, C.violet, "#a83c8f", "#5b7ea8", "#8a6a1f", "#2f8f9a"];
 
+// Provider color families for the stacked bar view. The four labs that
+// actually contest the top of the board each get a brand-adjacent hue;
+// everything else stacks into one neutral "Others" bar. Within a family the
+// models ramp from saturated (biggest) to pale — the same trick the weekly
+// bars use for weekdays.
+const RACE_GROUP_ORDER = ["Anthropic", "OpenAI", "X.AI", "Z.AI", "Others"];
+const RACE_GROUP_COLORS: Record<string, string> = {
+  Anthropic: "#c15f3c",
+  OpenAI: "#10a37f",
+  "X.AI": "#24292f",
+  "Z.AI": "#3b3fc4",
+  Others: "#71808f",
+};
+/** The lab family a model slug stacks under — keyed off the author segment. */
+function raceGroup(modelId: string): string {
+  const author = (modelId.split("/")[0] ?? "").toLowerCase();
+  if (author === "anthropic") return "Anthropic";
+  if (author === "openai") return "OpenAI";
+  if (author === "x-ai" || author === "xai") return "X.AI";
+  if (author === "z-ai" || author === "zhipu") return "Z.AI";
+  return "Others";
+}
+
 export type RaceMode = "spend" | "tokens";
 export type RaceBucket = "week" | "day";
 export type RaceStyle = "line" | "bar";
@@ -1118,9 +1141,11 @@ export type RaceStyle = "line" | "bar";
  * the day it happened rather than smeared across a week bar.
  *
  * `style` picks the mark. Lines let you follow ten trends at a glance without
- * crowding; grouped bars are the discrete-comparison read — "on this day,
- * which of the top few actually moved the money" — so bar mode caps the field
- * tighter (`topN` defaults to 5 for the caller, but is honoured either way).
+ * crowding; bars are the additive read — one bar per lab family (Anthropic,
+ * OpenAI, X.AI, Z.AI, Others) with that lab's models stacked inside it, so a
+ * bar's height is what the lab moved that day and the shade bands say which
+ * model carried it. Stacking absorbs a wider field than grouping did, so bar
+ * mode takes a larger `topN` than the line view.
  */
 export function ModelRaceChart({
   points,
@@ -1156,33 +1181,68 @@ export function ModelRaceChart({
         ? `${name}: $%{y:.3s} · ${dateLabel}<extra></extra>`
         : `${name}: %{y:.3s} tok · ${dateLabel}<extra></extra>`;
     // Bars need a real 0 for a bucket where the model was silent, otherwise
-    // the group leaves a phantom gap where its slot should be. Lines want the
-    // null so Plotly breaks the line at gaps rather than drawing across them.
+    // the stack misplaces every segment above the gap. Lines want the null so
+    // Plotly breaks the line at gaps rather than drawing across them.
     const yFor = (p: (typeof points)[number], modelId: string): number | null => {
       const v = values(p)[modelId];
       if (v != null) return Number(v) || 0;
       return style === "bar" ? 0 : null;
     };
+
+    if (style === "bar") {
+      // One bar per lab per bucket, its models stacked inside. Members keep
+      // the overall spend order, so the biggest model sits at the bottom of
+      // its lab's stack wearing the most saturated shade.
+      const byGroup = new Map<string, string[]>();
+      for (const modelId of top) {
+        const g = raceGroup(modelId);
+        byGroup.set(g, [...(byGroup.get(g) ?? []), modelId]);
+      }
+      const fmt = (v: number) => (mode === "spend" ? `$${fmtCompact(v)}` : `${fmtCompact(v)} tok`);
+      const traces: Data[] = [];
+      for (const g of RACE_GROUP_ORDER) {
+        const members = byGroup.get(g) ?? [];
+        const color = RACE_GROUP_COLORS[g]!;
+        const groupTotal = (p: (typeof points)[number]) =>
+          members.reduce((sum, m) => sum + (Number(values(p)[m]) || 0), 0);
+        members.forEach((modelId, i) => {
+          const alpha = members.length === 1 ? 0.92 : Math.max(0.33, 0.95 - (i * 0.62) / (members.length - 1));
+          traces.push(
+            barGrouping(
+              {
+                type: "bar",
+                name: shortSlug(modelId),
+                legendgroup: g,
+                legendgrouptitle: { text: g, font: { family: FONT, size: 10, color } },
+                x,
+                y: points.map((p) => yFor(p, modelId)),
+                marker: { color: hexToRgba(color, alpha), line: { color: "#ffffff", width: 0.5 } },
+                // Every segment repeats its lab's day total — with per-segment
+                // hover there is no other place to read the stack's height.
+                hovertext: points.map((p) => {
+                  const v = Number(values(p)[modelId]) || 0;
+                  const total = groupTotal(p);
+                  return `${shortSlug(modelId)} · ${fmt(v)}${total > 0 ? `<br>${g} total: ${fmt(total)}` : ""}`;
+                }),
+                hovertemplate: `%{hovertext}<br>${dateLabel}<extra></extra>`,
+              },
+              g,
+            ),
+          );
+        });
+      }
+      return { data: traces };
+    }
+
     const traces: Data[] = top.map((modelId, i) => {
       const color = RACE_COLORS[i % RACE_COLORS.length]!;
       const name = shortSlug(modelId);
-      const y = points.map((p) => yFor(p, modelId));
-      if (style === "bar") {
-        return {
-          type: "bar",
-          name,
-          x,
-          y,
-          marker: { color },
-          hovertemplate: hover(name),
-        };
-      }
       return {
         type: "scatter",
         mode: "lines",
         name,
         x,
-        y,
+        y: points.map((p) => yFor(p, modelId)),
         line: { color, width: bucket === "week" ? 1.8 : 1.4 },
         hovertemplate: hover(name),
       };
@@ -1210,7 +1270,9 @@ export function ModelRaceChart({
     // into the top margin instead of down over the traces.
     legend: { orientation: "h", x: 0, y: 1.02, yanchor: "bottom", font: { family: FONT, size: 9.5, color: C.muted } },
     margin: { l: 52, r: 12, t: 86, b: 34 },
-    ...(style === "bar" ? { barmode: "group", bargap: 0.15, bargroupgap: 0.05 } : {}),
+    // "stack" + offsetgroup per lab: models stack inside their lab's bar,
+    // labs stand side by side within the bucket slot.
+    ...(style === "bar" ? { barmode: "stack", bargap: 0.25, bargroupgap: 0.06 } : {}),
     yaxis: {
       gridcolor: C.grid,
       showgrid: true,
