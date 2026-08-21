@@ -1108,12 +1108,13 @@ const RACE_COLORS = [C.min, C.teal, C.amber, C.up, C.down, C.violet, "#a83c8f", 
 // everything else stacks into one neutral "Others" bar. Within a family the
 // models ramp from saturated (biggest) to pale — the same trick the weekly
 // bars use for weekdays.
-const RACE_GROUP_ORDER = ["Anthropic", "OpenAI", "X.AI", "Z.AI", "Others"];
+const RACE_GROUP_ORDER = ["Anthropic", "OpenAI", "Google", "X.AI", "Z.AI", "Others"];
 const RACE_GROUP_COLORS: Record<string, string> = {
   Anthropic: "#c15f3c",
   OpenAI: "#10a37f",
+  Google: "#4285f4",
   "X.AI": "#24292f",
-  "Z.AI": "#3b3fc4",
+  "Z.AI": "#6236c9",
   Others: "#71808f",
 };
 /** The lab family a model slug stacks under — keyed off the author segment. */
@@ -1121,6 +1122,7 @@ function raceGroup(modelId: string): string {
   const author = (modelId.split("/")[0] ?? "").toLowerCase();
   if (author === "anthropic") return "Anthropic";
   if (author === "openai") return "OpenAI";
+  if (author === "google") return "Google";
   if (author === "x-ai" || author === "xai") return "X.AI";
   if (author === "z-ai" || author === "zhipu") return "Z.AI";
   return "Others";
@@ -1142,7 +1144,7 @@ export type RaceStyle = "line" | "bar";
  *
  * `style` picks the mark. Lines let you follow ten trends at a glance without
  * crowding; bars are the additive read — one bar per lab family (Anthropic,
- * OpenAI, X.AI, Z.AI, Others) with that lab's models stacked inside it, so a
+ * OpenAI, Google, X.AI, Z.AI, Others) with that lab's models stacked inside it, so a
  * bar's height is what the lab moved that day and the shade bands say which
  * model carried it. Stacking absorbs a wider field than grouping did, so bar
  * mode takes a larger `topN` than the line view.

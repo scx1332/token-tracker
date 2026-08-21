@@ -536,7 +536,7 @@ export function MarketView({ navigate }: { navigate: (to: string) => void }) {
                 <button
                   className={raceStyle === "bar" ? "active" : ""}
                   onClick={() => setRaceStyle("bar")}
-                  title="One stacked bar per lab — Anthropic, OpenAI, X.AI, Z.AI, Others — with each lab's models stacked inside it"
+                  title="One stacked bar per lab — Anthropic, OpenAI, Google, X.AI, Z.AI, Others — with each lab's models stacked inside it"
                 >
                   Bars · by lab
                 </button>
