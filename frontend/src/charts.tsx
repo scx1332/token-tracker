@@ -1198,13 +1198,24 @@ export function ModelRaceChart({
         const g = raceGroup(modelId);
         byGroup.set(g, [...(byGroup.get(g) ?? []), modelId]);
       }
+      // Everything the payload carries beyond the named field — the rest of
+      // the top ~50 — sums into one pale segment on top of the Others bar, so
+      // the stacks add up to the whole tracked market, not just its head.
+      const shown = new Set(top);
+      const restIds = new Set<string>();
+      for (const p of points) {
+        for (const k of Object.keys(values(p))) if (!shown.has(k)) restIds.add(k);
+      }
+      const restAt = (p: (typeof points)[number]) =>
+        [...restIds].reduce((sum, m) => sum + (Number(values(p)[m]) || 0), 0);
       const fmt = (v: number) => (mode === "spend" ? `$${fmtCompact(v)}` : `${fmtCompact(v)} tok`);
       const traces: Data[] = [];
       for (const g of RACE_GROUP_ORDER) {
         const members = byGroup.get(g) ?? [];
         const color = RACE_GROUP_COLORS[g]!;
         const groupTotal = (p: (typeof points)[number]) =>
-          members.reduce((sum, m) => sum + (Number(values(p)[m]) || 0), 0);
+          members.reduce((sum, m) => sum + (Number(values(p)[m]) || 0), 0) +
+          (g === "Others" ? restAt(p) : 0);
         members.forEach((modelId, i) => {
           const alpha = members.length === 1 ? 0.92 : Math.max(0.33, 0.95 - (i * 0.62) / (members.length - 1));
           traces.push(
@@ -1230,6 +1241,27 @@ export function ModelRaceChart({
             ),
           );
         });
+        if (g === "Others" && restIds.size > 0) {
+          traces.push(
+            barGrouping(
+              {
+                type: "bar",
+                name: `+${restIds.size} more models`,
+                legendgroup: g,
+                legendgrouptitle: { text: g, font: { family: FONT, size: 10, color } },
+                x,
+                y: points.map((p) => restAt(p)),
+                marker: { color: hexToRgba(color, 0.22), line: { color: "#ffffff", width: 0.5 } },
+                hovertext: points.map((p) => {
+                  const total = groupTotal(p);
+                  return `+${restIds.size} more models · ${fmt(restAt(p))}${total > 0 ? `<br>${g} total: ${fmt(total)}` : ""}`;
+                }),
+                hovertemplate: `%{hovertext}<br>${dateLabel}<extra></extra>`,
+              },
+              g,
+            ),
+          );
+        }
       }
       return { data: traces };
     }

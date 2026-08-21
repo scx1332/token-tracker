@@ -269,9 +269,14 @@ export function createServer(storage: Storage, options: ServerOptions) {
     const daysRaw = q.get("days");
     const days = daysRaw && /^\d+$/.test(daysRaw) ? Math.min(Number(daysRaw), 800) : RACE_DAYS;
     const bucket = q.get("bucket") === "day" ? "day" : "week";
+    // The stacked bar view names a dozen models and folds the rest of the top
+    // 50 into one segment, so it asks for a wider field than the default 14.
+    const topRaw = q.get("top");
+    const topN = topRaw && /^\d+$/.test(topRaw) ? Number(topRaw) : undefined;
     const points = await storage.getModelRace({
       since: raceSince(days),
       bucket,
+      ...(topN !== undefined ? { topN } : {}),
       excludeFree: excludeFreeFromParams(q),
     });
     return json({ bucket, points });

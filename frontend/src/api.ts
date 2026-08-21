@@ -328,10 +328,11 @@ export const api = {
    * this is really for the daily grain — same window, ~7x the rows, so it is
    * kept off the first page load and fetched when the grain is switched.
    */
-  race: (params: { bucket?: "week" | "day"; days?: number; includeFree?: boolean } = {}) => {
+  race: (params: { bucket?: "week" | "day"; days?: number; top?: number; includeFree?: boolean } = {}) => {
     const q = new URLSearchParams();
     if (params.bucket) q.set("bucket", params.bucket);
     if (params.days) q.set("days", String(params.days));
+    if (params.top) q.set("top", String(params.top));
     if (params.includeFree) q.set("includeFree", "true");
     const qs = q.toString();
     return get<{ bucket: "week" | "day"; points: RacePoint[] }>(`/market/race${qs ? `?${qs}` : ""}`);

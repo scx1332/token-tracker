@@ -30,8 +30,11 @@ export function MarketView({ navigate }: { navigate: (to: string) => void }) {
   // stack absorbs a wider model field than lines can carry. Lines stay a
   // click away for following individual trends.
   const [raceStyle, setRaceStyle] = useState<"line" | "bar">("bar");
-  const [dailyRace, setDailyRace] = useState<{ key: string; points: RacePoint[] } | null>(null);
-  const [dailyRaceError, setDailyRaceError] = useState<string | null>(null);
+  // Race points per "bucket:filter" key. Both grains come from the lazy
+  // endpoint at a top-50 field — wider than /market's inline top 14 — so the
+  // bars' "rest of the field" segment sums real models, not a truncated tail.
+  const [raceCache, setRaceCache] = useState<Record<string, RacePoint[]>>({});
+  const [raceError, setRaceError] = useState<string | null>(null);
   const [weekMode, setWeekMode] = useState<"spend" | "tokens" | "both">("both");
   const [indexMode, setIndexMode] = useState<"price" | "compute">("price");
   // Apps default to the same day the model leaderboard shows, not the month.
@@ -67,22 +70,21 @@ export function MarketView({ navigate }: { navigate: (to: string) => void }) {
     };
   }, [includeFree]);
 
-  // The daily race is ~7x the weekly payload, so it stays off the first load
-  // and is fetched the first time the grain is switched — then kept, keyed by
-  // the free-tier filter, so flipping back and forth costs nothing.
-  const raceKey = includeFree ? "all" : "paid";
+  // The wide race payload stays off the first /market load and is fetched per
+  // grain + free-tier filter — then kept, so flipping back and forth is free.
+  const raceKey = `${raceBucket}:${includeFree ? "all" : "paid"}`;
   useEffect(() => {
-    if (raceBucket !== "day" || dailyRace?.key === raceKey) return;
+    if (raceCache[raceKey]) return;
     let alive = true;
-    setDailyRaceError(null);
+    setRaceError(null);
     api
-      .race({ bucket: "day", includeFree })
-      .then((r) => alive && setDailyRace({ key: raceKey, points: r.points }))
-      .catch((e) => alive && setDailyRaceError(String(e.message ?? e)));
+      .race({ bucket: raceBucket, top: 50, includeFree })
+      .then((r) => alive && setRaceCache((c) => ({ ...c, [raceKey]: r.points })))
+      .catch((e) => alive && setRaceError(String(e.message ?? e)));
     return () => {
       alive = false;
     };
-  }, [raceBucket, raceKey, dailyRace, includeFree]);
+  }, [raceBucket, raceKey, raceCache, includeFree]);
 
   const computeComparison = useMemo(
     () => buildComparison(market?.priceIndex ?? [], gpuDaily, "medianUsd"),
@@ -144,21 +146,17 @@ export function MarketView({ navigate }: { navigate: (to: string) => void }) {
       ? (weekValue(lastFullWeek)! - prevValue) / prevValue
       : null;
 
-  // Whichever grain is showing, clipped to the window the race covers. Daily
-  // points are absent until their fetch lands — and while the free-tier filter
-  // is being changed, the cached ones belong to the *other* filter, so they
-  // don't count either.
-  const freshDailyRace = dailyRace?.key === raceKey ? dailyRace.points : null;
-  const raceWindow = (raceBucket === "week" ? market.race.points : freshDailyRace ?? []).filter(
-    (p) => p.date >= RACE_SINCE,
-  );
+  // Whichever grain is showing, clipped to the window the race covers. Points
+  // are absent until the fetch for this grain + filter lands.
+  const raceFetched = raceCache[raceKey] ?? null;
+  const raceWindow = (raceFetched ?? []).filter((p) => p.date >= RACE_SINCE);
   // Daily bars get a short leash. The full window is ~13 weeks, and 91 groups
   // of 5 bars is ~455 bars across the row — each one a couple of pixels wide,
   // which is a texture, not a chart. Four weeks is what the mark can actually
   // render. Lines stay long: they cross rather than crowd.
   const raceClipsToRecent = raceStyle === "bar" && raceBucket === "day";
   const racePoints = raceClipsToRecent ? raceWindow.slice(-BAR_DAYS) : raceWindow;
-  const raceLoading = raceBucket === "day" && freshDailyRace === null && !dailyRaceError;
+  const raceLoading = raceFetched === null && !raceError;
 
   const priceIndexChange = seriesChange(weightedSeries);
   const spendChange = seriesChange(spendSeries.slice(-14));
@@ -488,7 +486,7 @@ export function MarketView({ navigate }: { navigate: (to: string) => void }) {
               <div className="chart-note">
                 {raceMode === "spend" ? "est. spend" : "tokens"} per {raceBucket} ·{" "}
                 {raceBucket === "week" ? "full weeks only" : "one point per day"} ·{" "}
-                {raceStyle === "bar" ? "top 12, one bar per lab" : "top 10"} ·{" "}
+                {raceStyle === "bar" ? "one bar per lab · top 12 + rest of the top 50" : "top 10"} ·{" "}
                 {/* The field is ranked over exactly what's drawn, so the note
                     names the drawn window rather than the fetched one. */}
                 {raceClipsToRecent
@@ -542,10 +540,10 @@ export function MarketView({ navigate }: { navigate: (to: string) => void }) {
           {raceLoading ? (
             // Hold the plot's height so switching grain doesn't bounce the row.
             <div style={{ height: 380, display: "grid", placeItems: "center" }}>
-              <Loading label="Loading daily race…" />
+              <Loading label="Loading the race…" />
             </div>
-          ) : dailyRaceError && raceBucket === "day" ? (
-            <div className="empty" style={{ padding: "40px 10px" }}>Daily race unavailable — {dailyRaceError}</div>
+          ) : raceError ? (
+            <div className="empty" style={{ padding: "40px 10px" }}>Race unavailable — {raceError}</div>
           ) : racePoints.length > 1 ? (
             <ModelRaceChart
               points={racePoints}

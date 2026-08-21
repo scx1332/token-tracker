@@ -1276,7 +1276,7 @@ export class Storage {
     excludeFree?: boolean;
   }): Promise<{ date: string; spendByModel: Record<string, number>; tokensByModel: Record<string, number> }[]> {
     const grain = filter.bucket ?? "week";
-    const topN = Math.min(Math.max(1, filter.topN ?? 14), 40);
+    const topN = Math.min(Math.max(1, filter.topN ?? 14), 50);
     const freeClause = filter.excludeFree ? ` AND ${this.notFreeSql("us")}` : "";
     // Days need no truncation: bucket_date already is the bucket.
     const bucketSql = grain === "day" ? "us.bucket_date" : "date_trunc('week', us.bucket_date)::date";
