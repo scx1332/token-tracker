@@ -158,6 +158,17 @@ describe("HTTP server (integration)", () => {
       const fallback = await (await fetch(`${base}/market/race?bucket=fortnight`)).json();
       expect(fallback.bucket).toBe("week");
       expect(fallback.points).toEqual(weekly.points);
+
+      // A pinned model rides into the field past the rank cut; unpinned it
+      // falls to it. days[1] is safely inside the fetch window either way.
+      await storage.upsertUsage({
+        modelId: "tiny/underdog", provider: "", bucketDate: days[1]!, tokens: 1,
+        promptTokens: null, completionTokens: null, requests: null, estimatedSpendUsd: 0.01, source: "rankings",
+      });
+      const cut = await (await fetch(`${base}/market/race?bucket=day&top=1`)).json();
+      expect(Object.keys(cut.points[1].spendByModel)).toEqual(["z-ai/glm-5.2"]);
+      const pinned = await (await fetch(`${base}/market/race?bucket=day&top=1&pin=tiny/underdog`)).json();
+      expect(pinned.points[1].spendByModel["tiny/underdog"]).toBe(0.01);
     } finally {
       server.stop(true);
       await cleanup();

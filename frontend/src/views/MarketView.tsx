@@ -13,6 +13,12 @@ import type { GpuDailyRow } from "../api";
 /** The accelerator the market view overlays by default — today's flagship. */
 const OVERLAY_GPU = "B200";
 
+// Models named in the race's bar stacks even when they rank outside the top
+// field — fresh launches whose window total lags their run rate (grok-4.6
+// shipped 2026-08-12), plus the gpt-5.6 siblings worth telling apart from sol.
+// Module-scoped so the chart's memo sees one stable array.
+const RACE_PINS = ["openai/gpt-5.6-luna", "openai/gpt-5.6-terra", "openai/gpt-5.5", "x-ai/grok-4.6"];
+
 export function MarketView({ navigate }: { navigate: (to: string) => void }) {
   const [market, setMarket] = useState<MarketResponse | null>(null);
   const [health, setHealth] = useState<HealthResponse | null>(null);
@@ -78,7 +84,7 @@ export function MarketView({ navigate }: { navigate: (to: string) => void }) {
     let alive = true;
     setRaceError(null);
     api
-      .race({ bucket: raceBucket, top: 50, includeFree })
+      .race({ bucket: raceBucket, top: 50, pin: RACE_PINS, includeFree })
       .then((r) => alive && setRaceCache((c) => ({ ...c, [raceKey]: r.points })))
       .catch((e) => alive && setRaceError(String(e.message ?? e)));
     return () => {
@@ -486,7 +492,7 @@ export function MarketView({ navigate }: { navigate: (to: string) => void }) {
               <div className="chart-note">
                 {raceMode === "spend" ? "est. spend" : "tokens"} per {raceBucket} ·{" "}
                 {raceBucket === "week" ? "full weeks only" : "one point per day"} ·{" "}
-                {raceStyle === "bar" ? "one bar per lab · top 12 + rest of the top 50" : "top 10"} ·{" "}
+                {raceStyle === "bar" ? "one bar per lab · top models named, the rest of the top 50 as a pale cap" : "top 10"} ·{" "}
                 {/* The field is ranked over exactly what's drawn, so the note
                     names the drawn window rather than the fetched one. */}
                 {raceClipsToRecent
@@ -552,6 +558,7 @@ export function MarketView({ navigate }: { navigate: (to: string) => void }) {
               mode={raceMode}
               bucket={raceBucket}
               style={raceStyle}
+              pinned={RACE_PINS}
             />
           ) : (
             <div className="empty" style={{ padding: "40px 10px" }}>

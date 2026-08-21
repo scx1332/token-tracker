@@ -1154,6 +1154,7 @@ export function ModelRaceChart({
   mode = "spend",
   bucket = "week",
   style = "line",
+  pinned = [],
   nowMs = Date.now(),
 }: {
   points: { date: string; spendByModel: Record<string, number>; tokensByModel: Record<string, number> }[];
@@ -1162,6 +1163,8 @@ export function ModelRaceChart({
   mode?: RaceMode;
   bucket?: RaceBucket;
   style?: RaceStyle;
+  /** Bar view only: models named even when they rank outside the top field. */
+  pinned?: string[];
   nowMs?: number;
 }) {
   const { data } = useMemo(() => {
@@ -1190,32 +1193,32 @@ export function ModelRaceChart({
     };
 
     if (style === "bar") {
-      // One bar per lab per bucket, its models stacked inside. Members keep
-      // the overall spend order, so the biggest model sits at the bottom of
-      // its lab's stack wearing the most saturated shade.
-      const byGroup = new Map<string, string[]>();
-      for (const modelId of top) {
+      // One bar per lab per bucket, its models stacked inside. The named field
+      // is the overall top plus any pinned models the data carries; within a
+      // lab, members sort by window total so the biggest sits at the bottom of
+      // the stack wearing the most saturated shade. Whatever the payload holds
+      // beyond the named field sums into a pale "+N more" cap on its own lab's
+      // bar, so every stack adds up to that lab's whole tracked book.
+      const named = new Set(top);
+      for (const m of pinned) if (totals.has(m)) named.add(m);
+      const membersOf = new Map<string, string[]>();
+      const restOf = new Map<string, string[]>();
+      for (const modelId of [...totals.keys()].sort((a, b) => (totals.get(b) ?? 0) - (totals.get(a) ?? 0))) {
         const g = raceGroup(modelId);
-        byGroup.set(g, [...(byGroup.get(g) ?? []), modelId]);
+        const bucket_ = named.has(modelId) ? membersOf : restOf;
+        bucket_.set(g, [...(bucket_.get(g) ?? []), modelId]);
       }
-      // Everything the payload carries beyond the named field — the rest of
-      // the top ~50 — sums into one pale segment on top of the Others bar, so
-      // the stacks add up to the whole tracked market, not just its head.
-      const shown = new Set(top);
-      const restIds = new Set<string>();
-      for (const p of points) {
-        for (const k of Object.keys(values(p))) if (!shown.has(k)) restIds.add(k);
-      }
-      const restAt = (p: (typeof points)[number]) =>
-        [...restIds].reduce((sum, m) => sum + (Number(values(p)[m]) || 0), 0);
       const fmt = (v: number) => (mode === "spend" ? `$${fmtCompact(v)}` : `${fmtCompact(v)} tok`);
       const traces: Data[] = [];
       for (const g of RACE_GROUP_ORDER) {
-        const members = byGroup.get(g) ?? [];
+        const members = membersOf.get(g) ?? [];
+        const rest = restOf.get(g) ?? [];
+        if (members.length === 0 && rest.length === 0) continue;
         const color = RACE_GROUP_COLORS[g]!;
+        const restAt = (p: (typeof points)[number]) =>
+          rest.reduce((sum, m) => sum + (Number(values(p)[m]) || 0), 0);
         const groupTotal = (p: (typeof points)[number]) =>
-          members.reduce((sum, m) => sum + (Number(values(p)[m]) || 0), 0) +
-          (g === "Others" ? restAt(p) : 0);
+          members.reduce((sum, m) => sum + (Number(values(p)[m]) || 0), 0) + restAt(p);
         members.forEach((modelId, i) => {
           const alpha = members.length === 1 ? 0.92 : Math.max(0.33, 0.95 - (i * 0.62) / (members.length - 1));
           traces.push(
@@ -1241,20 +1244,20 @@ export function ModelRaceChart({
             ),
           );
         });
-        if (g === "Others" && restIds.size > 0) {
+        if (rest.length > 0) {
           traces.push(
             barGrouping(
               {
                 type: "bar",
-                name: `+${restIds.size} more models`,
+                name: `${g} · +${rest.length} more`,
                 legendgroup: g,
                 legendgrouptitle: { text: g, font: { family: FONT, size: 10, color } },
                 x,
                 y: points.map((p) => restAt(p)),
-                marker: { color: hexToRgba(color, 0.22), line: { color: "#ffffff", width: 0.5 } },
+                marker: { color: hexToRgba(color, 0.2), line: { color: "#ffffff", width: 0.5 } },
                 hovertext: points.map((p) => {
                   const total = groupTotal(p);
-                  return `+${restIds.size} more models · ${fmt(restAt(p))}${total > 0 ? `<br>${g} total: ${fmt(total)}` : ""}`;
+                  return `+${rest.length} more ${g} models · ${fmt(restAt(p))}${total > 0 ? `<br>${g} total: ${fmt(total)}` : ""}`;
                 }),
                 hovertemplate: `%{hovertext}<br>${dateLabel}<extra></extra>`,
               },
@@ -1280,7 +1283,7 @@ export function ModelRaceChart({
       };
     });
     return { data: traces };
-  }, [points, topN, mode, bucket, style]);
+  }, [points, topN, mode, bucket, style, pinned]);
 
   // Ten lines cannot each grow a dotted tail without doubling the legend and
   // the hover stack, so the day in progress gets the shaded band alone — the

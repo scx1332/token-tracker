@@ -1268,11 +1268,15 @@ export class Storage {
    *
    * Either grain keeps the union of the window's top `topN` models by spend
    * and by tokens, so an expensive low-volume model still gets a line.
+   * `pin` forces named models into that field regardless of rank — how the
+   * market view keeps a just-launched model visible before its window total
+   * has caught up with its run rate.
    */
   async getModelRace(filter: {
     since: string;
     bucket?: "week" | "day";
     topN?: number;
+    pin?: string[];
     excludeFree?: boolean;
   }): Promise<{ date: string; spendByModel: Record<string, number>; tokensByModel: Record<string, number> }[]> {
     const grain = filter.bucket ?? "week";
@@ -1305,6 +1309,9 @@ export class Storage {
     }
     const rank = (m: Map<string, number>) => [...m.entries()].sort((a, b) => b[1] - a[1]).slice(0, topN).map(([k]) => k);
     const keep = new Set([...rank(totalSpend), ...rank(totalTokens)]);
+    // Pins with no usage rows at all still contribute nothing — keep only
+    // gates rows that exist.
+    for (const m of filter.pin ?? []) keep.add(m);
 
     const byBucket = new Map<string, { spendByModel: Record<string, number>; tokensByModel: Record<string, number> }>();
     for (const row of result.rows) {

@@ -273,10 +273,19 @@ export function createServer(storage: Storage, options: ServerOptions) {
     // 50 into one segment, so it asks for a wider field than the default 14.
     const topRaw = q.get("top");
     const topN = topRaw && /^\d+$/.test(topRaw) ? Number(topRaw) : undefined;
+    // Comma-separated model ids forced into the field regardless of rank — a
+    // fresh launch's window total lags its run rate for weeks. Capped small:
+    // this is a pin, not a second ranking.
+    const pin = (q.get("pin") ?? "")
+      .split(",")
+      .map((m) => m.trim())
+      .filter((m) => /^[\w.:-]+\/[\w.:-]+$/.test(m))
+      .slice(0, 12);
     const points = await storage.getModelRace({
       since: raceSince(days),
       bucket,
       ...(topN !== undefined ? { topN } : {}),
+      ...(pin.length ? { pin } : {}),
       excludeFree: excludeFreeFromParams(q),
     });
     return json({ bucket, points });
