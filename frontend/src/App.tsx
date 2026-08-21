@@ -9,6 +9,7 @@ import { ModelsView } from "./views/ModelsView";
 import { ModelView } from "./views/ModelView";
 import { ProvidersView } from "./views/ProvidersView";
 import { ComputeView } from "./views/ComputeView";
+import { RaceView } from "./views/RaceView";
 
 function currentPath(): string {
   return window.location.pathname + window.location.search;
@@ -67,6 +68,7 @@ export function App() {
 
   const navItems: { key: string; label: string; to: string }[] = [
     { key: "market", label: "Market", to: "/" },
+    { key: "race", label: "Model Race", to: "/race" },
     { key: "explorer", label: "Price Explorer", to: "/explorer" },
     { key: "models", label: "Models", to: "/models" },
     { key: "providers", label: "Providers", to: "/providers" },
@@ -105,6 +107,7 @@ export function App() {
 
       <main className="container">
         {route.name === "market" && <MarketView navigate={navigate} />}
+        {route.name === "race" && <RaceView />}
         {route.name === "explorer" && <ExplorerView modelId={route.id} provider={route.provider} navigate={navigate} />}
         {route.name === "models" && (
           // Keyed by the deep link: /models?provider=… reached from another
@@ -133,6 +136,7 @@ export function App() {
 
 type Route =
   | { name: "market" }
+  | { name: "race" }
   | { name: "explorer"; id?: string; provider?: string }
   | { name: "models"; q?: string; provider?: string }
   | { name: "providers" }
@@ -163,6 +167,7 @@ function parseRoute(fullPath: string): Route {
     if (provider) route.provider = provider;
     return route;
   }
+  if (path.startsWith("race")) return { name: "race" };
   if (path.startsWith("providers")) return { name: "providers" };
   if (path.startsWith("compute")) return { name: "compute" };
   return { name: "market" };

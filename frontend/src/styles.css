@@ -1296,3 +1296,11 @@ table.tt tbody tr:last-child td {
   color: var(--faint);
   max-width: 96ch;
 }
+
+/* The race panel's fullscreen wrapper: the browser paints fullscreen elements
+   on black, so restore the page ground and let a too-short viewport scroll. */
+.race-wrap-fs {
+  background: #f4f6f9;
+  overflow: auto;
+  padding: 16px 20px;
+}

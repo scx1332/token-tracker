@@ -1,10 +1,11 @@
 import { encodeModelId } from "../routes";
 import { useEffect, useMemo, useState } from "react";
-import { api, type HealthResponse, type MarketResponse, type RacePoint } from "../api";
+import { api, type HealthResponse, type MarketResponse } from "../api";
 import { Kpi, Panel, SectionHead, RankList, Loading, ErrorNote, type RankItem } from "../components";
-import { SpendTokensChart, PriceIndexChart, WeeklyBarsChart, ModelRaceChart, ComputeVsTokensChart, C } from "../charts";
+import { SpendTokensChart, PriceIndexChart, WeeklyBarsChart, ComputeVsTokensChart, C } from "../charts";
 import { usd, usdExact, compact, mtok, relTime, seriesChange, displayName, pct, shortDate } from "../format";
 import { forecastCurrentWeek, toWeeklyBuckets, trimLeadingPartial } from "../weekly";
+import { RacePanel } from "./RacePanel";
 import { closedOnly, isClosedDay } from "../runningDay";
 import { rankAppsByDaySpend } from "../apps";
 import { buildComparison } from "../gpu";
@@ -13,34 +14,10 @@ import type { GpuDailyRow } from "../api";
 /** The accelerator the market view overlays by default — today's flagship. */
 const OVERLAY_GPU = "B200";
 
-// Models named in the race's bar stacks even when they rank outside the top
-// field — fresh launches whose window total lags their run rate (grok-4.6
-// shipped 2026-08-12), plus the gpt-5.6 siblings worth telling apart from sol.
-// Module-scoped so the chart's memo sees one stable array.
-const RACE_PINS = ["openai/gpt-5.6-luna", "openai/gpt-5.6-terra", "openai/gpt-5.5", "x-ai/grok-4.6"];
-
 export function MarketView({ navigate }: { navigate: (to: string) => void }) {
   const [market, setMarket] = useState<MarketResponse | null>(null);
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
-  // Price × volume is the market-share signal that matters, so spend leads.
-  const [raceMode, setRaceMode] = useState<"spend" | "tokens">("spend");
-  // Days lead: the daily grain is where a launch, a price cut or a routing
-  // switch actually shows up on the day it happened. Weekly bars hide that
-  // detail inside whichever bar it fell in, and the "trend" they express is
-  // one anyone can eyeball from a daily line just as easily. Weeks are still a
-  // click away for anyone who wants the weekday noise summed out.
-  const [raceBucket, setRaceBucket] = useState<"week" | "day">("day");
-  // Stacked lab bars lead: one bar per provider family with its models
-  // stacked inside is the "who moved the money" read at a glance, and the
-  // stack absorbs a wider model field than lines can carry. Lines stay a
-  // click away for following individual trends.
-  const [raceStyle, setRaceStyle] = useState<"line" | "bar">("bar");
-  // Race points per "bucket:filter" key. Both grains come from the lazy
-  // endpoint at a top-50 field — wider than /market's inline top 14 — so the
-  // bars' "rest of the field" segment sums real models, not a truncated tail.
-  const [raceCache, setRaceCache] = useState<Record<string, RacePoint[]>>({});
-  const [raceError, setRaceError] = useState<string | null>(null);
   const [weekMode, setWeekMode] = useState<"spend" | "tokens" | "both">("both");
   const [indexMode, setIndexMode] = useState<"price" | "compute">("price");
   // Apps default to the same day the model leaderboard shows, not the month.
@@ -48,10 +25,6 @@ export function MarketView({ navigate }: { navigate: (to: string) => void }) {
   // Free-tier traffic is volume without a market: default it out of token stats.
   const [includeFree, setIncludeFree] = useState(false);
   const [gpuDaily, setGpuDaily] = useState<GpuDailyRow[]>([]);
-  // The race starts Jun 15 2026 — earlier history is noise for today's field.
-  const RACE_SINCE = "2026-06-15";
-  // How many days of daily bars fit on the row before they stop being bars.
-  const BAR_DAYS = 28;
 
   useEffect(() => {
     let alive = true;
@@ -75,22 +48,6 @@ export function MarketView({ navigate }: { navigate: (to: string) => void }) {
       alive = false;
     };
   }, [includeFree]);
-
-  // The wide race payload stays off the first /market load and is fetched per
-  // grain + free-tier filter — then kept, so flipping back and forth is free.
-  const raceKey = `${raceBucket}:${includeFree ? "all" : "paid"}`;
-  useEffect(() => {
-    if (raceCache[raceKey]) return;
-    let alive = true;
-    setRaceError(null);
-    api
-      .race({ bucket: raceBucket, top: 50, pin: RACE_PINS, includeFree })
-      .then((r) => alive && setRaceCache((c) => ({ ...c, [raceKey]: r.points })))
-      .catch((e) => alive && setRaceError(String(e.message ?? e)));
-    return () => {
-      alive = false;
-    };
-  }, [raceBucket, raceKey, raceCache, includeFree]);
 
   const computeComparison = useMemo(
     () => buildComparison(market?.priceIndex ?? [], gpuDaily, "medianUsd"),
@@ -151,18 +108,6 @@ export function MarketView({ navigate }: { navigate: (to: string) => void }) {
     prevValue && prevValue > 0 && weekValue(lastFullWeek) !== null
       ? (weekValue(lastFullWeek)! - prevValue) / prevValue
       : null;
-
-  // Whichever grain is showing, clipped to the window the race covers. Points
-  // are absent until the fetch for this grain + filter lands.
-  const raceFetched = raceCache[raceKey] ?? null;
-  const raceWindow = (raceFetched ?? []).filter((p) => p.date >= RACE_SINCE);
-  // Daily bars get a short leash. The full window is ~13 weeks, and 91 groups
-  // of 5 bars is ~455 bars across the row — each one a couple of pixels wide,
-  // which is a texture, not a chart. Four weeks is what the mark can actually
-  // render. Lines stay long: they cross rather than crowd.
-  const raceClipsToRecent = raceStyle === "bar" && raceBucket === "day";
-  const racePoints = raceClipsToRecent ? raceWindow.slice(-BAR_DAYS) : raceWindow;
-  const raceLoading = raceFetched === null && !raceError;
 
   const priceIndexChange = seriesChange(weightedSeries);
   const spendChange = seriesChange(spendSeries.slice(-14));
@@ -482,90 +427,10 @@ export function MarketView({ navigate }: { navigate: (to: string) => void }) {
         </Panel>
       </div>
 
-      {/* Model race — full width so ten lines (or five grouped bars per bucket)
-          have room to spread out and legends can wrap without stealing plot */}
+      {/* Model race — full width; the panel is shared with the /race tab,
+          which adds fullscreen. Free-tier filtering follows the page switch. */}
       <div style={{ marginTop: 16 }}>
-        <Panel className="chart-card">
-          <div className="chart-head">
-            <div>
-              <div className="chart-title">The model race</div>
-              <div className="chart-note">
-                {raceMode === "spend" ? "est. spend" : "tokens"} per {raceBucket} ·{" "}
-                {raceBucket === "week" ? "full weeks only" : "one point per day"} ·{" "}
-                {raceStyle === "bar" ? "one bar per lab · top models named, the rest of the top 50 as a pale cap" : "top 10"} ·{" "}
-                {/* The field is ranked over exactly what's drawn, so the note
-                    names the drawn window rather than the fetched one. */}
-                {raceClipsToRecent
-                  ? `last ${BAR_DAYS} days`
-                  : `since ${shortDate(racePoints[0]?.date ?? RACE_SINCE)}`}
-              </div>
-            </div>
-            <div className="seg-row">
-              <div className="seg seg-sm">
-                <button className={raceMode === "spend" ? "active" : ""} onClick={() => setRaceMode("spend")}>
-                  Est. spend
-                </button>
-                <button className={raceMode === "tokens" ? "active" : ""} onClick={() => setRaceMode("tokens")}>
-                  Tokens
-                </button>
-              </div>
-              <div className="seg seg-sm">
-                <button
-                  className={raceBucket === "day" ? "active" : ""}
-                  onClick={() => setRaceBucket("day")}
-                  title="One point per day — a launch or routing switch lands on the day it happened"
-                >
-                  Daily
-                </button>
-                <button
-                  className={raceBucket === "week" ? "active" : ""}
-                  onClick={() => setRaceBucket("week")}
-                  title="Full ISO weeks — the trend, with weekday noise summed out"
-                >
-                  Weekly
-                </button>
-              </div>
-              <div className="seg seg-sm">
-                <button
-                  className={raceStyle === "line" ? "active" : ""}
-                  onClick={() => setRaceStyle("line")}
-                  title="Ten model trends over time"
-                >
-                  Lines
-                </button>
-                <button
-                  className={raceStyle === "bar" ? "active" : ""}
-                  onClick={() => setRaceStyle("bar")}
-                  title="One stacked bar per lab — Anthropic, OpenAI, Google, X.AI, Z.AI, Others — with each lab's models stacked inside it"
-                >
-                  Bars · by lab
-                </button>
-              </div>
-            </div>
-          </div>
-          {raceLoading ? (
-            // Hold the plot's height so switching grain doesn't bounce the row.
-            <div style={{ height: 380, display: "grid", placeItems: "center" }}>
-              <Loading label="Loading the race…" />
-            </div>
-          ) : raceError ? (
-            <div className="empty" style={{ padding: "40px 10px" }}>Race unavailable — {raceError}</div>
-          ) : racePoints.length > 1 ? (
-            <ModelRaceChart
-              points={racePoints}
-              height={380}
-              topN={raceStyle === "bar" ? 12 : 10}
-              mode={raceMode}
-              bucket={raceBucket}
-              style={raceStyle}
-              pinned={RACE_PINS}
-            />
-          ) : (
-            <div className="empty" style={{ padding: "40px 10px" }}>
-              No {raceBucket === "week" ? "weekly" : "daily"} history yet.
-            </div>
-          )}
-        </Panel>
+        <RacePanel includeFree={includeFree} height={380} />
       </div>
 
       {/* Leaderboards */}
