@@ -19,9 +19,15 @@ export function MarketView({ navigate }: { navigate: (to: string) => void }) {
   const [error, setError] = useState<string | null>(null);
   // Price × volume is the market-share signal that matters, so spend leads.
   const [raceMode, setRaceMode] = useState<"spend" | "tokens">("spend");
-  // Weeks lead the race: a single day swings ~20% on weekday alone, so the
-  // trend reads cleaner. Days are one click away for anyone chasing a launch.
-  const [raceBucket, setRaceBucket] = useState<"week" | "day">("week");
+  // Days lead: the daily grain is where a launch, a price cut or a routing
+  // switch actually shows up on the day it happened. Weekly bars hide that
+  // detail inside whichever bar it fell in, and the "trend" they express is
+  // one anyone can eyeball from a daily line just as easily. Weeks are still a
+  // click away for anyone who wants the weekday noise summed out.
+  const [raceBucket, setRaceBucket] = useState<"week" | "day">("day");
+  // Lines carry ten models cleanly; bars are the "who moved today" read, so a
+  // tighter top-five field fits without squishing.
+  const [raceStyle, setRaceStyle] = useState<"line" | "bar">("line");
   const [dailyRace, setDailyRace] = useState<{ key: string; points: RacePoint[] } | null>(null);
   const [dailyRaceError, setDailyRaceError] = useState<string | null>(null);
   const [weekMode, setWeekMode] = useState<"spend" | "tokens" | "both">("both");
@@ -466,8 +472,8 @@ export function MarketView({ navigate }: { navigate: (to: string) => void }) {
               <div className="chart-title">The model race</div>
               <div className="chart-note">
                 {raceMode === "spend" ? "est. spend" : "tokens"} per {raceBucket} ·{" "}
-                {raceBucket === "week" ? "full weeks only" : "one point per day"} · top 10 · since{" "}
-                {shortDate(RACE_SINCE)}
+                {raceBucket === "week" ? "full weeks only" : "one point per day"} · top {raceStyle === "bar" ? 5 : 10}
+                {" "}· since {shortDate(RACE_SINCE)}
               </div>
             </div>
             <div className="seg-row">
@@ -481,18 +487,34 @@ export function MarketView({ navigate }: { navigate: (to: string) => void }) {
               </div>
               <div className="seg seg-sm">
                 <button
+                  className={raceBucket === "day" ? "active" : ""}
+                  onClick={() => setRaceBucket("day")}
+                  title="One point per day — a launch or routing switch lands on the day it happened"
+                >
+                  Daily
+                </button>
+                <button
                   className={raceBucket === "week" ? "active" : ""}
                   onClick={() => setRaceBucket("week")}
                   title="Full ISO weeks — the trend, with weekday noise summed out"
                 >
                   Weekly
                 </button>
+              </div>
+              <div className="seg seg-sm">
                 <button
-                  className={raceBucket === "day" ? "active" : ""}
-                  onClick={() => setRaceBucket("day")}
-                  title="One point per day — noisier, but a launch lands on the day it happened"
+                  className={raceStyle === "line" ? "active" : ""}
+                  onClick={() => setRaceStyle("line")}
+                  title="Ten model trends over time"
                 >
-                  Daily
+                  Lines
+                </button>
+                <button
+                  className={raceStyle === "bar" ? "active" : ""}
+                  onClick={() => setRaceStyle("bar")}
+                  title="Top 5 as grouped bars per bucket — the discrete-comparison read"
+                >
+                  Bars · top 5
                 </button>
               </div>
             </div>
@@ -505,7 +527,14 @@ export function MarketView({ navigate }: { navigate: (to: string) => void }) {
           ) : dailyRaceError && raceBucket === "day" ? (
             <div className="empty" style={{ padding: "40px 10px" }}>Daily race unavailable — {dailyRaceError}</div>
           ) : racePoints.length > 1 ? (
-            <ModelRaceChart points={racePoints} height={300} topN={10} mode={raceMode} bucket={raceBucket} />
+            <ModelRaceChart
+              points={racePoints}
+              height={300}
+              topN={raceStyle === "bar" ? 5 : 10}
+              mode={raceMode}
+              bucket={raceBucket}
+              style={raceStyle}
+            />
           ) : (
             <div className="empty" style={{ padding: "40px 10px" }}>
               No {raceBucket === "week" ? "weekly" : "daily"} history yet.

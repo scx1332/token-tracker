@@ -1105,6 +1105,7 @@ const RACE_COLORS = [C.min, C.teal, C.amber, C.up, C.down, C.violet, "#a83c8f", 
 
 export type RaceMode = "spend" | "tokens";
 export type RaceBucket = "week" | "day";
+export type RaceStyle = "line" | "bar";
 
 /**
  * The race for the top models, built from our own daily snapshots (real
@@ -1115,6 +1116,11 @@ export type RaceBucket = "week" | "day";
  * The daily series is the noisier read (weekday seasonality is worth ~20% on
  * its own) but it is where a launch or a routing switch actually shows up, on
  * the day it happened rather than smeared across a week bar.
+ *
+ * `style` picks the mark. Lines let you follow ten trends at a glance without
+ * crowding; grouped bars are the discrete-comparison read — "on this day,
+ * which of the top few actually moved the money" — so bar mode caps the field
+ * tighter (`topN` defaults to 5 for the caller, but is honoured either way).
  */
 export function ModelRaceChart({
   points,
@@ -1122,6 +1128,7 @@ export function ModelRaceChart({
   topN = 10,
   mode = "spend",
   bucket = "week",
+  style = "line",
   nowMs = Date.now(),
 }: {
   points: { date: string; spendByModel: Record<string, number>; tokensByModel: Record<string, number> }[];
@@ -1129,6 +1136,7 @@ export function ModelRaceChart({
   topN?: number;
   mode?: RaceMode;
   bucket?: RaceBucket;
+  style?: RaceStyle;
   nowMs?: number;
 }) {
   const { data } = useMemo(() => {
@@ -1143,23 +1151,44 @@ export function ModelRaceChart({
     }
     const top = [...totals.entries()].sort((a, b) => b[1] - a[1]).slice(0, topN).map(([k]) => k);
     const x = points.map((p) => p.date);
-    const traces: Data[] = top.map((modelId, i) => ({
-      type: "scatter",
-      mode: "lines",
-      name: shortSlug(modelId),
-      x,
-      y: points.map((p) => {
-        const v = values(p)[modelId];
-        return v == null ? null : Number(v) || 0;
-      }),
-      line: { color: RACE_COLORS[i % RACE_COLORS.length], width: bucket === "week" ? 1.8 : 1.4 },
-      hovertemplate:
-        mode === "spend"
-          ? `${shortSlug(modelId)}: $%{y:.3s} · ${dateLabel}<extra></extra>`
-          : `${shortSlug(modelId)}: %{y:.3s} tok · ${dateLabel}<extra></extra>`,
-    }));
+    const hover = (name: string) =>
+      mode === "spend"
+        ? `${name}: $%{y:.3s} · ${dateLabel}<extra></extra>`
+        : `${name}: %{y:.3s} tok · ${dateLabel}<extra></extra>`;
+    // Bars need a real 0 for a bucket where the model was silent, otherwise
+    // the group leaves a phantom gap where its slot should be. Lines want the
+    // null so Plotly breaks the line at gaps rather than drawing across them.
+    const yFor = (p: (typeof points)[number], modelId: string): number | null => {
+      const v = values(p)[modelId];
+      if (v != null) return Number(v) || 0;
+      return style === "bar" ? 0 : null;
+    };
+    const traces: Data[] = top.map((modelId, i) => {
+      const color = RACE_COLORS[i % RACE_COLORS.length]!;
+      const name = shortSlug(modelId);
+      const y = points.map((p) => yFor(p, modelId));
+      if (style === "bar") {
+        return {
+          type: "bar",
+          name,
+          x,
+          y,
+          marker: { color },
+          hovertemplate: hover(name),
+        };
+      }
+      return {
+        type: "scatter",
+        mode: "lines",
+        name,
+        x,
+        y,
+        line: { color, width: bucket === "week" ? 1.8 : 1.4 },
+        hovertemplate: hover(name),
+      };
+    });
     return { data: traces };
-  }, [points, topN, mode, bucket]);
+  }, [points, topN, mode, bucket, style]);
 
   // Ten lines cannot each grow a dotted tail without doubling the legend and
   // the hover stack, so the day in progress gets the shaded band alone — the
@@ -1173,12 +1202,15 @@ export function ModelRaceChart({
 
   const layout = baseLayout({
     height,
+    // Bars carry their own tooltip per group already; a unified hover would
+    // stack all five and make the tallest one unreadable.
     hovermode: "closest",
     showlegend: true,
     // Anchor the legend's bottom above the plot so its ~4 wrapped rows grow
     // into the top margin instead of down over the traces.
     legend: { orientation: "h", x: 0, y: 1.02, yanchor: "bottom", font: { family: FONT, size: 9.5, color: C.muted } },
     margin: { l: 52, r: 12, t: 86, b: 34 },
+    ...(style === "bar" ? { barmode: "group", bargap: 0.15, bargroupgap: 0.05 } : {}),
     yaxis: {
       gridcolor: C.grid,
       showgrid: true,
