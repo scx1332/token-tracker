@@ -39,6 +39,8 @@ export function MarketView({ navigate }: { navigate: (to: string) => void }) {
   const [gpuDaily, setGpuDaily] = useState<GpuDailyRow[]>([]);
   // The race starts Jun 15 2026 — earlier history is noise for today's field.
   const RACE_SINCE = "2026-06-15";
+  // How many days of daily bars fit on the row before they stop being bars.
+  const BAR_DAYS = 28;
 
   useEffect(() => {
     let alive = true;
@@ -145,9 +147,15 @@ export function MarketView({ navigate }: { navigate: (to: string) => void }) {
   // is being changed, the cached ones belong to the *other* filter, so they
   // don't count either.
   const freshDailyRace = dailyRace?.key === raceKey ? dailyRace.points : null;
-  const racePoints = (raceBucket === "week" ? market.race.points : freshDailyRace ?? []).filter(
+  const raceWindow = (raceBucket === "week" ? market.race.points : freshDailyRace ?? []).filter(
     (p) => p.date >= RACE_SINCE,
   );
+  // Daily bars get a short leash. The full window is ~13 weeks, and 91 groups
+  // of 5 bars is ~455 bars across the row — each one a couple of pixels wide,
+  // which is a texture, not a chart. Four weeks is what the mark can actually
+  // render. Lines stay long: they cross rather than crowd.
+  const raceClipsToRecent = raceStyle === "bar" && raceBucket === "day";
+  const racePoints = raceClipsToRecent ? raceWindow.slice(-BAR_DAYS) : raceWindow;
   const raceLoading = raceBucket === "day" && freshDailyRace === null && !dailyRaceError;
 
   const priceIndexChange = seriesChange(weightedSeries);
@@ -477,8 +485,13 @@ export function MarketView({ navigate }: { navigate: (to: string) => void }) {
               <div className="chart-title">The model race</div>
               <div className="chart-note">
                 {raceMode === "spend" ? "est. spend" : "tokens"} per {raceBucket} ·{" "}
-                {raceBucket === "week" ? "full weeks only" : "one point per day"} · top {raceStyle === "bar" ? 5 : 10}
-                {" "}· since {shortDate(RACE_SINCE)}
+                {raceBucket === "week" ? "full weeks only" : "one point per day"} · top{" "}
+                {raceStyle === "bar" ? 5 : 10} ·{" "}
+                {/* The field is ranked over exactly what's drawn, so the note
+                    names the drawn window rather than the fetched one. */}
+                {raceClipsToRecent
+                  ? `last ${BAR_DAYS} days`
+                  : `since ${shortDate(racePoints[0]?.date ?? RACE_SINCE)}`}
               </div>
             </div>
             <div className="seg-row">
