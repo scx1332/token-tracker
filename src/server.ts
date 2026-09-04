@@ -239,7 +239,10 @@ export function createServer(storage: Storage, options: ServerOptions) {
       storage.getLatestMarketSnapshot(),
       storage.getMarketUsageSeries({ since, excludeFree }),
       storage.getDailyPriceIndex({ since }),
-      storage.getTopModelsByUsage(15, { excludeFree }),
+      // Deeper than the ~15 rows the board shows: the leaderboard groups a
+      // product line's versions into one row (Opus 5 + 4.8 + 4.7 …), so the
+      // 15th family can be assembled from models ranked well below 15th.
+      storage.getTopModelsByUsage(80, { excludeFree }),
       readKvJson("apps_ranking"),
       readKvJson("apps_spend"),
       readKvJson("weekly_chart"),

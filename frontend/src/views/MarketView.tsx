@@ -2,13 +2,22 @@ import { encodeModelId } from "../routes";
 import { useEffect, useMemo, useState } from "react";
 import { api, type HealthResponse, type MarketResponse } from "../api";
 import { Kpi, Panel, SectionHead, RankList, Loading, ErrorNote, type RankItem } from "../components";
-import { SpendTokensChart, PriceIndexChart, WeeklyBarsChart, ComputeVsTokensChart, C } from "../charts";
+import {
+  SpendTokensChart,
+  PriceIndexChart,
+  WeeklyBarsChart,
+  ComputeVsTokensChart,
+  ProviderRevenueChart,
+  PROVIDER_COLORS,
+  C,
+} from "../charts";
 import { usd, usdExact, compact, mtok, relTime, seriesChange, displayName, pct, shortDate } from "../format";
 import { forecastCurrentWeek, toWeeklyBuckets, trimLeadingPartial } from "../weekly";
 import { RacePanel } from "./RacePanel";
 import { closedOnly, isClosedDay } from "../runningDay";
 import { rankAppsByDaySpend } from "../apps";
 import { buildComparison } from "../gpu";
+import { familySeries, groupByFamily } from "../family";
 import type { GpuDailyRow } from "../api";
 
 /** The accelerator the market view overlays by default — today's flagship. */
@@ -25,6 +34,8 @@ export function MarketView({ navigate }: { navigate: (to: string) => void }) {
   // Free-tier traffic is volume without a market: default it out of token stats.
   const [includeFree, setIncludeFree] = useState(false);
   const [gpuDaily, setGpuDaily] = useState<GpuDailyRow[]>([]);
+  // The family stack headlines dollars for the same reason the leaderboard does.
+  const [familyMode, setFamilyMode] = useState<"spend" | "tokens">("spend");
 
   useEffect(() => {
     let alive = true;
@@ -127,17 +138,35 @@ export function MarketView({ navigate }: { navigate: (to: string) => void }) {
       ? "last complete day"
       : "day still running"
     : null;
-  const topModelItems: RankItem[] = market.topModels.slice(0, 15).map((m) => {
-    const max = market.topModels[0]?.spendUsd ?? 1;
+  // A version bump is not a new product: Opus 5 + 4.8 + 4.7 are one line being
+  // paid for by one set of customers, and ranking them apart understates every
+  // lab that keeps its slugs alive. See family.ts for the curated rules.
+  const modelFamilies = groupByFamily(
+    market.topModels.map((m) => ({ ...m, name: displayName(m.name) })),
+  );
+  const topModelItems: RankItem[] = modelFamilies.slice(0, 15).map((f) => {
+    const max = modelFamilies[0]?.spendUsd ?? 1;
     return {
-      name: displayName(m.name),
-      value: m.spendUsd,
-      valueLabel: `${usd(m.spendUsd)} · ${compact(m.tokens)} tok`,
-      frac: (m.spendUsd ?? 0) / (max || 1),
-      href: `/model/${encodeModelId(m.modelId)}`,
+      name: f.members.length > 1 ? `${f.label} · ${f.members.length} models` : f.label,
+      value: f.spendUsd,
+      valueLabel: `${usd(f.spendUsd)} · ${compact(f.tokens)} tok`,
+      frac: f.spendUsd / (max || 1),
+      // Multi-model rows have no page of their own, so they open their biggest
+      // member — the one the name is really about.
+      href: `/model/${encodeModelId(f.members[0]!.modelId)}`,
       color: C.gold,
     };
   });
+
+  // The same families over time: weekly stacked est. spend, from the race
+  // points /market already ships (full ISO weeks, so no running-week stub).
+  const familyStack = familySeries(market.race.points, familyMode, 8);
+  const familyTraces = familyStack.series.map((s, i) => ({
+    name: s.label,
+    x: familyStack.dates,
+    y: s.values as (number | null)[],
+    color: s.key === "__others" ? C.faint : PROVIDER_COLORS[i % PROVIDER_COLORS.length]!,
+  }));
 
   // Per-app spend is assembled from per-model app leaderboards (OpenRouter
   // publishes no direct per-app dollars); fall back to token ranking until
@@ -470,6 +499,37 @@ export function MarketView({ navigate }: { navigate: (to: string) => void }) {
             </div>
           </div>
           {appItems.length ? <RankList items={appItems} /> : <div className="empty">No app data.</div>}
+        </Panel>
+      </div>
+
+      {/* The leaderboard's families, over time — same grouping, stacked, so a
+          line's whole book is one band rather than a version-by-version churn. */}
+      <div style={{ marginTop: 16 }}>
+        <Panel className="chart-card">
+          <div className="chart-head">
+            <div>
+              <div className="chart-title">Model families over time</div>
+              <div className="chart-note">
+                stacked {familyMode === "spend" ? "est. spend" : "tokens"} per week · versions of one line summed ·
+                top 8 families, the rest pooled
+              </div>
+            </div>
+            <div className="seg seg-sm">
+              <button className={familyMode === "spend" ? "active" : ""} onClick={() => setFamilyMode("spend")}>
+                Est. spend
+              </button>
+              <button className={familyMode === "tokens" ? "active" : ""} onClick={() => setFamilyMode("tokens")}>
+                Tokens
+              </button>
+            </div>
+          </div>
+          {familyTraces.length && familyStack.dates.length > 1 ? (
+            <ProviderRevenueChart traces={familyTraces} mode={familyMode} height={320} />
+          ) : (
+            <div className="empty" style={{ padding: "40px 10px" }}>
+              Not enough weekly history for the family stack yet.
+            </div>
+          )}
         </Panel>
       </div>
     </>
