@@ -20,10 +20,13 @@ describe("familyOf", () => {
     expect(new Set(keys).size).toBe(4);
   });
 
-  it("joins GLM 5.2 and 5.3 but not the Flash cut", () => {
+  it("joins GLM 5.2 and 5.3, and every Flash cut into its own line", () => {
     expect(key("z-ai/glm-5.2")).toBe("glm-5.2-5.3");
     expect(key("z-ai/glm-5.3")).toBe("glm-5.2-5.3");
-    expect(key("z-ai/glm-5.3-flash")).toBe("glm-5-flash");
+    expect(key("z-ai/glm-5.3-flash")).toBe("glm-flash");
+    expect(key("z-ai/glm-5.2-flash")).toBe("glm-flash");
+    expect(key("z-ai/glm-4.7-flash")).toBe("glm-flash");
+    expect(key("z-ai/glm-5-flash")).toBe("glm-flash");
     // Older generations stay their own rows.
     expect(key("z-ai/glm-5.1")).toBe("z-ai/glm-5.1");
     expect(key("z-ai/glm-4.7")).toBe("z-ai/glm-4.7");

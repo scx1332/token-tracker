@@ -25,10 +25,11 @@ const RULES: { test: RegExp; key: string; label: string }[] = [
   { test: /^anthropic\/claude-sonnet/, key: "claude-sonnet", label: "Claude Sonnet" },
   { test: /^anthropic\/claude-fable/, key: "claude-fable", label: "Claude Fable" },
   { test: /^anthropic\/claude-haiku/, key: "claude-haiku", label: "Claude Haiku" },
-  // Z.ai: the current GLM 5 generation (5.2 + 5.3); the Flash cut is its own
-  // product at its own price, so it groups separately rather than into these.
-  { test: /^z-ai\/glm-5\.[23](?!.*flash)/, key: "glm-5.2-5.3", label: "GLM 5.2 + 5.3" },
-  { test: /^z-ai\/glm-5\.[23].*flash/, key: "glm-5-flash", label: "GLM 5 Flash" },
+  // Z.ai: every Flash cut is one product line (this rule runs first, so the
+  // GLM 5 rule below never claims one); the chat models of the current
+  // generation, 5.2 + 5.3, are the other.
+  { test: /^z-ai\/glm-.*flash/, key: "glm-flash", label: "GLM Flash" },
+  { test: /^z-ai\/glm-5\.[23]/, key: "glm-5.2-5.3", label: "GLM 5.2 + 5.3" },
   // DeepSeek ships dated re-cuts of the same model — "-0731", "-0813".
   { test: /^deepseek\/deepseek-v4-flash/, key: "deepseek-v4-flash", label: "DeepSeek V4 Flash" },
   { test: /^deepseek\/deepseek-v4-pro/, key: "deepseek-v4-pro", label: "DeepSeek V4 Pro" },
