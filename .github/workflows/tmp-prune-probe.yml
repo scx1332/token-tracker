@@ -1,0 +1,41 @@
+# TEMPORARY. Proves GITHUB_TOKEN can delete a GHCR package version, which the
+# retention step in backup-verify.yml depends on and cannot exercise until four
+# versions exist. Deleted once it has answered the question.
+name: tmp — prune probe
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Push a throwaway version, then delete it
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          IMAGE: ghcr.io/${{ github.repository_owner }}/token-tracker-backup
+          API: /users/${{ github.repository_owner }}/packages/container/token-tracker-backup/versions
+        run: |
+          set -euo pipefail
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+
+          mkdir -p probe
+          echo "prune probe from run ${{ github.run_id }}" >probe/marker.txt
+          printf 'FROM alpine:3\nCOPY marker.txt /marker.txt\n' >probe/Dockerfile
+          docker build -t "$IMAGE:probe" probe
+          docker push "$IMAGE:probe"
+
+          id=$(gh api "$API" --paginate | jq -r '.[] | select(.metadata.container.tags | index("probe")) | .id' | head -1)
+          [ -n "$id" ] || { echo "::error::pushed :probe but cannot see it in the versions API"; exit 1; }
+          echo "probe version id: $id"
+
+          if gh api -X DELETE "$API/$id"; then
+            echo "DELETE OK — GITHUB_TOKEN can prune versions, no PAT needed"
+          else
+            echo "::error::DELETE failed — retention needs a PAT in GHCR_CLEANUP_TOKEN (delete:packages)"
+            exit 1
+          fi

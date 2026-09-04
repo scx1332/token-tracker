@@ -5,13 +5,13 @@ import { ModelRaceChart } from "../charts";
 import { shortDate } from "../format";
 
 // The race starts Jun 15 2026 — earlier history is noise for today's field.
-const RACE_SINCE = "2026-06-15";
+export const RACE_SINCE = "2026-06-15";
 // How many days of daily bars fit on the row before they stop being bars.
 const BAR_DAYS = 28;
 // Models named in the race's bar stacks even when they rank outside the top
 // field — fresh launches whose window total lags their run rate (grok-4.6
 // shipped 2026-08-12), plus the gpt-5.6 siblings worth telling apart from sol.
-const RACE_PINS = ["openai/gpt-5.6-luna", "openai/gpt-5.6-terra", "openai/gpt-5.5", "x-ai/grok-4.6"];
+export const RACE_PINS = ["openai/gpt-5.6-luna", "openai/gpt-5.6-terra", "openai/gpt-5.5", "x-ai/grok-4.6"];
 
 /**
  * The model race, complete with its controls and its own lazy data fetching —
