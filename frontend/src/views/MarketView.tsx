@@ -169,11 +169,13 @@ export function MarketView({ navigate }: { navigate: (to: string) => void }) {
   const topModelItems: RankItem[] = modelFamilies.slice(0, 15).map((f) => {
     const max = modelFamilies[0]?.spendUsd ?? 1;
     return {
-      name: f.members.length > 1 ? `${f.label} · ${f.members.length} models` : f.label,
+      // A product line always says how many cuts it holds — "1 model" included,
+      // so a family of one reads the same as a family of five.
+      name: f.grouped ? `${f.label} · ${f.members.length} model${f.members.length === 1 ? "" : "s"}` : f.label,
       value: f.spendUsd,
       valueLabel: `${usd(f.spendUsd)} · ${compact(f.tokens)} tok`,
       // Hovering a grouped row shows the split it is hiding.
-      ...(f.members.length > 1
+      ...(f.grouped
         ? {
             title: f.members
               .map((m) => `${m.name} — ${usd(m.spendUsd)} (${(((m.spendUsd ?? 0) / (f.spendUsd || 1)) * 100).toFixed(0)}%)`)

@@ -159,14 +159,15 @@ describe("breakdownAt", () => {
     ]);
   });
 
-  it("drops members that were silent, and says nothing when one is left", () => {
-    expect(breakdownAt(opus, 1, fmt)).toEqual([]);
+  it("drops members that were silent, and still names the one that ran", () => {
+    expect(breakdownAt(opus, 1, fmt)).toEqual(["claude-opus-5 $100 · 100%"]);
   });
 
   it("caps the rows and pools the tail", () => {
     const many = {
       key: "k",
       label: "k",
+      grouped: true,
       values: [100],
       members: [50, 20, 10, 8, 5, 4, 2, 1].map((v, i) => ({ label: `m${i}`, values: [v] })),
     };
@@ -174,10 +175,16 @@ describe("breakdownAt", () => {
     expect(lines).toEqual(["m0 $50 · 50%", "m1 $20 · 20%", "m2 $10 · 10%", "+5 more $20 · 20%"]);
   });
 
-  it("says nothing for a one-model family or an empty bucket", () => {
-    const solo = familySeries(points, "spend", 5).series.find((s) => s.key === "glm-5.2-5.3")!;
-    expect(solo.members).toEqual([]);
-    expect(breakdownAt(solo, 0, fmt)).toEqual([]);
-    expect(breakdownAt({ key: "k", label: "k", values: [0], members: [] }, 0, fmt)).toEqual([]);
+  it("unfolds a product line holding a single model, so it reads like the rest", () => {
+    const glm = familySeries(points, "spend", 5).series.find((s) => s.key === "glm-5.2-5.3")!;
+    expect(glm.grouped).toBe(true);
+    expect(breakdownAt(glm, 0, fmt)).toEqual(["glm-5.2 $5 · 100%"]);
+  });
+
+  it("says nothing for a lone model or an empty bucket", () => {
+    const solo = familySeries(points, "spend", 5).series.find((s) => s.key === "x-ai/grok-4.6");
+    expect(solo).toBeUndefined();
+    expect(breakdownAt({ key: "k", label: "k", grouped: false, values: [5], members: [] }, 0, fmt)).toEqual([]);
+    expect(breakdownAt({ key: "k", label: "k", grouped: true, values: [0], members: [] }, 0, fmt)).toEqual([]);
   });
 });

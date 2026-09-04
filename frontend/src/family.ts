@@ -56,6 +56,10 @@ export function isGrouped(modelId: string): boolean {
 export interface FamilyRow<T> {
   key: string;
   label: string;
+  /** True when a rule named this row — a product line, even if it holds one
+   * model today. Such a row keeps its count and its split so a family of one
+   * reads the same way as a family of five. */
+  grouped: boolean;
   spendUsd: number;
   tokens: number;
   /** Members, biggest first — the leaderboard links to the head of this list. */
@@ -74,7 +78,7 @@ export function groupByFamily<T extends { modelId: string; name?: string; tokens
     const fam = familyOf(row.modelId, row.name);
     const existing = byKey.get(fam.key);
     const target =
-      existing ?? { key: fam.key, label: fam.label, spendUsd: 0, tokens: 0, members: [] as T[] };
+      existing ?? { key: fam.key, label: fam.label, grouped: fam.key !== row.modelId, spendUsd: 0, tokens: 0, members: [] as T[] };
     target.spendUsd += row.spendUsd ?? 0;
     target.tokens += row.tokens ?? 0;
     target.members.push(row);
@@ -89,6 +93,8 @@ export function groupByFamily<T extends { modelId: string; name?: string; tokens
 export interface FamilySeries {
   key: string;
   label: string;
+  /** A rule-named product line (or the pooled tail) rather than a lone model. */
+  grouped: boolean;
   /** One value per bucket; a bucket the family was silent in is 0, not a gap. */
   values: number[];
   /**
@@ -116,6 +122,7 @@ export function familySeries(
   const perBucket = points.map(() => new Map<string, number>());
   // Per family, the models inside it — kept so a band can explain itself.
   const membersOf = new Map<string, Map<string, number[]>>();
+  const grouped = new Set<string>();
 
   points.forEach((p, i) => {
     for (const [modelId, raw] of Object.entries(valuesAt(p))) {
@@ -124,6 +131,7 @@ export function familySeries(
       // A family's label comes from a rule, or from the one model in it; the
       // slug is the only name the race payload carries.
       labels.set(fam.key, fam.label);
+      if (fam.key !== modelId) grouped.add(fam.key);
       totals.set(fam.key, (totals.get(fam.key) ?? 0) + v);
       perBucket[i]!.set(fam.key, (perBucket[i]!.get(fam.key) ?? 0) + v);
       const members = membersOf.get(fam.key) ?? new Map<string, number[]>();
@@ -144,17 +152,21 @@ export function familySeries(
   const series: FamilySeries[] = named.map((key) => ({
     key,
     label: shortLabel(labels.get(key) ?? key),
+    grouped: grouped.has(key),
     values: perBucket.map((b) => b.get(key) ?? 0),
-    // A one-model family explains nothing by listing itself.
-    members:
-      (membersOf.get(key)?.size ?? 0) > 1
-        ? [...(membersOf.get(key) ?? new Map())].map(([modelId, values]) => ({ label: shortLabel(modelId), values })).sort(byWindowTotal)
-        : [],
+    // A lone model has nothing to unfold; a product line always does, even the
+    // month it holds one cut — the reader still wants to know which cut.
+    members: grouped.has(key)
+      ? [...(membersOf.get(key) ?? new Map<string, number[]>())]
+          .map(([modelId, values]) => ({ label: shortLabel(modelId), values }))
+          .sort(byWindowTotal)
+      : [],
   }));
   if (rest.length > 0) {
     series.push({
       key: "__others",
       label: `+${rest.length} more`,
+      grouped: true,
       values: perBucket.map((b) => {
         let sum = 0;
         for (const key of rest) sum += b.get(key) ?? 0;
@@ -189,7 +201,7 @@ export function breakdownAt(
     .map((m) => ({ label: m.label, value: m.values[index] ?? 0 }))
     .filter((r) => r.value > 0)
     .sort((a, b) => b.value - a.value);
-  if (rows.length < 2) return [];
+  if (rows.length === 0) return [];
   const shown = rows.slice(0, maxRows);
   const lines = shown.map((r) => `${r.label} ${fmt(r.value)} · ${((r.value / total) * 100).toFixed(0)}%`);
   const hidden = rows.length - shown.length;
