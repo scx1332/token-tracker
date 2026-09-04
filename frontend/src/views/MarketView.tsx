@@ -1,25 +1,16 @@
-import { encodeModelId } from "../routes";
 import { useEffect, useMemo, useState } from "react";
 import { api, type HealthResponse, type MarketResponse } from "../api";
 import { Kpi, Panel, SectionHead, RankList, Loading, ErrorNote, type RankItem } from "../components";
-import {
-  SpendTokensChart,
-  PriceIndexChart,
-  WeeklyBarsChart,
-  ComputeVsTokensChart,
-  ProviderRevenueChart,
-  PROVIDER_COLORS,
-  escapeHtml,
-  C,
-} from "../charts";
-import { usd, usdExact, compact, mtok, relTime, seriesChange, displayName, pct, shortDate } from "../format";
+import { SpendTokensChart, PriceIndexChart, WeeklyBarsChart, ComputeVsTokensChart, C } from "../charts";
+import { usd, usdExact, compact, mtok, relTime, seriesChange, pct, shortDate } from "../format";
 import { forecastCurrentWeek, toWeeklyBuckets, trimLeadingPartial } from "../weekly";
-import { RacePanel, RACE_PINS, RACE_SINCE } from "./RacePanel";
+import { RacePanel } from "./RacePanel";
+import { GroupedStackPanel, groupedRankItems } from "./GroupedBoard";
 import { closedOnly, isClosedDay } from "../runningDay";
 import { rankAppsByDaySpend } from "../apps";
 import { buildComparison } from "../gpu";
-import { breakdownAt, familySeries, groupByFamily } from "../family";
-import type { GpuDailyRow, RacePoint } from "../api";
+import { FAMILY_GROUPING } from "../family";
+import type { GpuDailyRow } from "../api";
 
 /** The accelerator the market view overlays by default — today's flagship. */
 const OVERLAY_GPU = "B200";
@@ -35,13 +26,6 @@ export function MarketView({ navigate }: { navigate: (to: string) => void }) {
   // Free-tier traffic is volume without a market: default it out of token stats.
   const [includeFree, setIncludeFree] = useState(false);
   const [gpuDaily, setGpuDaily] = useState<GpuDailyRow[]>([]);
-  // The family stack headlines dollars for the same reason the leaderboard does.
-  const [familyMode, setFamilyMode] = useState<"spend" | "tokens">("spend");
-  // Days lead: with versions summed into one band per line, the daily grain is
-  // legible — and it puts a launch or a routing switch on its own date.
-  const [familyBucket, setFamilyBucket] = useState<"day" | "week">("day");
-  // Daily race points are a separate (larger) fetch than /market's weekly ones.
-  const [dayRace, setDayRace] = useState<RacePoint[] | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -65,22 +49,6 @@ export function MarketView({ navigate }: { navigate: (to: string) => void }) {
       alive = false;
     };
   }, [includeFree]);
-
-  // Same request the race panel makes, so the two share one browser cache entry.
-  useEffect(() => {
-    if (familyBucket !== "day") return;
-    let alive = true;
-    setDayRace(null);
-    api
-      .race({ bucket: "day", top: 50, pin: RACE_PINS, includeFree })
-      .then((r) => alive && setDayRace(r.points))
-      // The weekly points are already on the page — fall back to them rather
-      // than blanking the panel.
-      .catch(() => alive && setFamilyBucket("week"));
-    return () => {
-      alive = false;
-    };
-  }, [familyBucket, includeFree]);
 
   const computeComparison = useMemo(
     () => buildComparison(market?.priceIndex ?? [], gpuDaily, "medianUsd"),
@@ -162,55 +130,9 @@ export function MarketView({ navigate }: { navigate: (to: string) => void }) {
     : null;
   // A version bump is not a new product: Opus 5 + 4.8 + 4.7 are one line being
   // paid for by one set of customers, and ranking them apart understates every
-  // lab that keeps its slugs alive. See family.ts for the curated rules.
-  const modelFamilies = groupByFamily(
-    market.topModels.map((m) => ({ ...m, name: displayName(m.name) })),
-  );
-  const topModelItems: RankItem[] = modelFamilies.slice(0, 15).map((f) => {
-    const max = modelFamilies[0]?.spendUsd ?? 1;
-    return {
-      // A product line always says how many cuts it holds — "1 model" included,
-      // so a family of one reads the same as a family of five.
-      name: f.grouped ? `${f.label} · ${f.members.length} model${f.members.length === 1 ? "" : "s"}` : f.label,
-      value: f.spendUsd,
-      valueLabel: `${usd(f.spendUsd)} · ${compact(f.tokens)} tok`,
-      // Hovering a grouped row shows the split it is hiding.
-      ...(f.grouped
-        ? {
-            title: f.members
-              .map((m) => `${m.name} — ${usd(m.spendUsd)} (${(((m.spendUsd ?? 0) / (f.spendUsd || 1)) * 100).toFixed(0)}%)`)
-              .join("\n"),
-          }
-        : {}),
-      frac: f.spendUsd / (max || 1),
-      // Multi-model rows have no page of their own, so they open their biggest
-      // member — the one the name is really about.
-      href: `/model/${encodeModelId(f.members[0]!.modelId)}`,
-      color: C.gold,
-    };
-  });
-
-  // The same families over time. Weeks come free with /market (full ISO weeks
-  // only); days are fetched on demand and carry a running day, which the chart
-  // shades. Either way the window starts where the race does.
-  const familyLoading = familyBucket === "day" && dayRace === null;
-  const familyPoints = (familyBucket === "day" ? dayRace ?? [] : market.race.points).filter(
-    (p) => p.date >= RACE_SINCE,
-  );
-  const familyStack = familySeries(familyPoints, familyMode, 8);
-  const familyFmt = (v: number) => (familyMode === "spend" ? usd(v) : `${compact(v)} tok`);
-  const familyTraces = familyStack.series.map((s, i) => ({
-    name: s.label,
-    x: familyStack.dates,
-    y: s.values as (number | null)[],
-    color: s.key === "__others" ? C.faint : PROVIDER_COLORS[i % PROVIDER_COLORS.length]!,
-    // What that band is made of on that date, each part with its share of the
-    // band — the whole point of summing versions is being able to unfold them.
-    hover: familyStack.dates.map((_, di) => {
-      const lines = breakdownAt(s, di, familyFmt);
-      return lines.length ? `<br>${lines.map((l) => escapeHtml(l)).join("<br>")}` : "";
-    }),
-  }));
+  // lab that keeps its slugs alive. See family.ts for the curated rules; the
+  // Best-models tab offers the same board under coarser groupings.
+  const topModelItems = groupedRankItems(market.topModels, FAMILY_GROUPING);
 
   // Per-app spend is assembled from per-model app leaderboards (OpenRouter
   // publishes no direct per-app dollars); fall back to token ranking until
@@ -549,56 +471,7 @@ export function MarketView({ navigate }: { navigate: (to: string) => void }) {
       {/* The leaderboard's families, over time — same grouping, stacked, so a
           line's whole book is one band rather than a version-by-version churn. */}
       <div style={{ marginTop: 16 }}>
-        <Panel className="chart-card">
-          <div className="chart-head">
-            <div>
-              <div className="chart-title">Model families over time</div>
-              <div className="chart-note">
-                stacked {familyMode === "spend" ? "est. spend" : "tokens"} per {familyBucket} · versions of one line
-                summed · top 8 families, the rest pooled
-                {familyBucket === "day" ? " · the shaded tail is today, still counting" : " · full weeks only"}
-              </div>
-            </div>
-            <div className="seg-row">
-              <div className="seg seg-sm">
-                <button className={familyMode === "spend" ? "active" : ""} onClick={() => setFamilyMode("spend")}>
-                  Est. spend
-                </button>
-                <button className={familyMode === "tokens" ? "active" : ""} onClick={() => setFamilyMode("tokens")}>
-                  Tokens
-                </button>
-              </div>
-              <div className="seg seg-sm">
-                <button
-                  className={familyBucket === "day" ? "active" : ""}
-                  onClick={() => setFamilyBucket("day")}
-                  title="One band per day — where a launch or a price cut actually lands"
-                >
-                  Daily
-                </button>
-                <button
-                  className={familyBucket === "week" ? "active" : ""}
-                  onClick={() => setFamilyBucket("week")}
-                  title="Full ISO weeks — the trend, with weekday noise summed out"
-                >
-                  Weekly
-                </button>
-              </div>
-            </div>
-          </div>
-          {familyLoading ? (
-            // Hold the plot's height so switching grain doesn't bounce the row.
-            <div style={{ height: 320, display: "grid", placeItems: "center" }}>
-              <Loading label="Loading daily families…" />
-            </div>
-          ) : familyTraces.length && familyStack.dates.length > 1 ? (
-            <ProviderRevenueChart traces={familyTraces} mode={familyMode} height={320} />
-          ) : (
-            <div className="empty" style={{ padding: "40px 10px" }}>
-              Not enough {familyBucket === "day" ? "daily" : "weekly"} history for the family stack yet.
-            </div>
-          )}
-        </Panel>
+        <GroupedStackPanel weeklyPoints={market.race.points} includeFree={includeFree} grouping={FAMILY_GROUPING} />
       </div>
     </>
   );

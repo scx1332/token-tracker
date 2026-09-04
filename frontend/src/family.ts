@@ -53,6 +53,24 @@ export function isGrouped(modelId: string): boolean {
   return familyOf(modelId).key !== modelId;
 }
 
+/**
+ * How a board sums the tape: `of` names the row/band a model lands in, and
+ * `memberOf` names the part it shows up as when that row is unfolded on hover.
+ * The family grouping unfolds into models; a coarser one (lab, origin, class)
+ * unfolds into families, so a lab's tooltip reads "Claude Opus 62% · Claude
+ * Sonnet 25% …" rather than fifteen slugs.
+ */
+export interface Grouping {
+  of: (modelId: string, name?: string) => Family;
+  memberOf: (modelId: string, name?: string) => string;
+}
+
+/** The default board: product lines, unfolding into their models. */
+export const FAMILY_GROUPING: Grouping = {
+  of: familyOf,
+  memberOf: (modelId, name) => name ?? shortLabel(modelId),
+};
+
 export interface FamilyRow<T> {
   key: string;
   label: string;
@@ -64,28 +82,40 @@ export interface FamilyRow<T> {
   tokens: number;
   /** Members, biggest first — the leaderboard links to the head of this list. */
   members: T[];
+  /** The row unfolded: its members summed by `memberOf`, biggest first. */
+  parts: { label: string; spendUsd: number; tokens: number }[];
 }
 
 /**
- * Sum rows into families, biggest est. spend first. Members keep their own
+ * Sum rows into groups, biggest est. spend first. Members keep their own
  * order by spend so the row can name and link its largest constituent.
  */
 export function groupByFamily<T extends { modelId: string; name?: string; tokens: number | null; spendUsd: number | null }>(
   rows: T[],
+  grouping: Grouping = FAMILY_GROUPING,
 ): FamilyRow<T>[] {
   const byKey = new Map<string, FamilyRow<T>>();
+  const partsOf = new Map<string, Map<string, { label: string; spendUsd: number; tokens: number }>>();
   for (const row of rows) {
-    const fam = familyOf(row.modelId, row.name);
+    const fam = grouping.of(row.modelId, row.name);
     const existing = byKey.get(fam.key);
     const target =
-      existing ?? { key: fam.key, label: fam.label, grouped: fam.key !== row.modelId, spendUsd: 0, tokens: 0, members: [] as T[] };
+      existing ?? { key: fam.key, label: fam.label, grouped: fam.key !== row.modelId, spendUsd: 0, tokens: 0, members: [] as T[], parts: [] };
     target.spendUsd += row.spendUsd ?? 0;
     target.tokens += row.tokens ?? 0;
     target.members.push(row);
     if (!existing) byKey.set(fam.key, target);
+    const partLabel = grouping.memberOf(row.modelId, row.name);
+    const parts = partsOf.get(fam.key) ?? new Map();
+    const part = parts.get(partLabel) ?? { label: partLabel, spendUsd: 0, tokens: 0 };
+    part.spendUsd += row.spendUsd ?? 0;
+    part.tokens += row.tokens ?? 0;
+    parts.set(partLabel, part);
+    partsOf.set(fam.key, parts);
   }
   for (const row of byKey.values()) {
     row.members.sort((a, b) => (b.spendUsd ?? 0) - (a.spendUsd ?? 0));
+    row.parts = [...(partsOf.get(row.key)?.values() ?? [])].sort((a, b) => b.spendUsd - a.spendUsd);
   }
   return [...byKey.values()].sort((a, b) => b.spendUsd - a.spendUsd || b.tokens - a.tokens);
 }
@@ -114,6 +144,7 @@ export function familySeries(
   points: { date: string; spendByModel: Record<string, number>; tokensByModel: Record<string, number> }[],
   mode: "spend" | "tokens",
   topN = 8,
+  grouping: Grouping = FAMILY_GROUPING,
 ): { dates: string[]; series: FamilySeries[] } {
   const dates = points.map((p) => p.date);
   const valuesAt = (p: (typeof points)[number]) => (mode === "spend" ? p.spendByModel : p.tokensByModel) ?? {};
@@ -127,7 +158,7 @@ export function familySeries(
   points.forEach((p, i) => {
     for (const [modelId, raw] of Object.entries(valuesAt(p))) {
       const v = Number(raw) || 0;
-      const fam = familyOf(modelId);
+      const fam = grouping.of(modelId);
       // A family's label comes from a rule, or from the one model in it; the
       // slug is the only name the race payload carries.
       labels.set(fam.key, fam.label);
@@ -135,9 +166,10 @@ export function familySeries(
       totals.set(fam.key, (totals.get(fam.key) ?? 0) + v);
       perBucket[i]!.set(fam.key, (perBucket[i]!.get(fam.key) ?? 0) + v);
       const members = membersOf.get(fam.key) ?? new Map<string, number[]>();
-      const row = members.get(modelId) ?? new Array(points.length).fill(0);
+      const part = grouping.memberOf(modelId);
+      const row = members.get(part) ?? new Array(points.length).fill(0);
       row[i] = (row[i] ?? 0) + v;
-      members.set(modelId, row);
+      members.set(part, row);
       membersOf.set(fam.key, members);
     }
   });
@@ -157,9 +189,7 @@ export function familySeries(
     // A lone model has nothing to unfold; a product line always does, even the
     // month it holds one cut — the reader still wants to know which cut.
     members: grouped.has(key)
-      ? [...(membersOf.get(key) ?? new Map<string, number[]>())]
-          .map(([modelId, values]) => ({ label: shortLabel(modelId), values }))
-          .sort(byWindowTotal)
+      ? [...(membersOf.get(key) ?? new Map<string, number[]>())].map(([label, values]) => ({ label, values })).sort(byWindowTotal)
       : [],
   }));
   if (rest.length > 0) {
@@ -213,7 +243,7 @@ export function breakdownAt(
 }
 
 /** Slugs make poor legend entries: drop the author, keep the model. */
-function shortLabel(labelOrSlug: string): string {
+export function shortLabel(labelOrSlug: string): string {
   if (!labelOrSlug.includes("/")) return labelOrSlug;
   const [path, variant] = labelOrSlug.split(":");
   const base = (path ?? labelOrSlug).split("/").pop() ?? labelOrSlug;
