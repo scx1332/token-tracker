@@ -103,6 +103,8 @@ describe("board groupings", () => {
     const { series } = familySeries(points, "spend", 5, groupingByKey("lab"));
     expect(series[0]!.label).toBe("Anthropic");
     expect(series[0]!.members.map((m) => m.label)).toEqual(["Claude Opus", "Claude Sonnet"]);
+    // No display names in the race payload: a lone model shows its slug's model half.
+    expect(series[1]!.members.map((m) => m.label)).toEqual(["gpt-5.6-sol"]);
   });
 
   it("falls back to product lines for an unknown key", () => {

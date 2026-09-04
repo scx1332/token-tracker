@@ -12,7 +12,7 @@
  * table, so an unknown author or slug gets an honest bucket ("Other labs",
  * "Rest of world") rather than a guess.
  */
-import { familyOf, type Family, type Grouping } from "./family";
+import { familyOf, shortLabel, type Family, type Grouping } from "./family";
 
 export type GroupingKey = "family" | "lab" | "origin" | "class";
 
@@ -212,10 +212,12 @@ export function classGroupOf(modelId: string): Family {
 
 // ---------------------------------------------------------------------------
 
-/** Coarser groupings unfold into product lines, never into raw slugs. */
+/** Coarser groupings unfold into product lines, never into raw slugs — a
+ * lone model shows its display name, or its slug's model half when the
+ * payload (the race) carries no names. */
 const familyPart = (modelId: string, name?: string) => {
   const fam = familyOf(modelId, name);
-  return fam.key === modelId ? (name ?? fam.label) : fam.label;
+  return fam.key === modelId ? (name ?? shortLabel(modelId)) : fam.label;
 };
 
 export const GROUPINGS: BoardGrouping[] = [
@@ -225,7 +227,7 @@ export const GROUPINGS: BoardGrouping[] = [
     rows: "product lines — versions and re-cuts of one model summed",
     parts: "models",
     of: familyOf,
-    memberOf: (modelId, name) => name ?? (modelId.split("/").pop() ?? modelId),
+    memberOf: (modelId, name) => name ?? shortLabel(modelId),
   },
   {
     key: "lab",

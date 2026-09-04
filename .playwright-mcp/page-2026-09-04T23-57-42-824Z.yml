@@ -1,0 +1,519 @@
+- generic [ref=f2e3]:
+  - banner [ref=f2e4]:
+    - generic [ref=f2e5]:
+      - link "TokenExchange" [ref=f2e6] [cursor=pointer]:
+        - /url: /
+      - navigation [ref=f2e12]:
+        - link "Market" [ref=f2e13] [cursor=pointer]:
+          - /url: /
+        - link "Model Race" [ref=f2e14] [cursor=pointer]:
+          - /url: /race
+        - link "Price Explorer" [ref=f2e15] [cursor=pointer]:
+          - /url: /explorer
+        - link "Models" [ref=f2e16] [cursor=pointer]:
+          - /url: /models
+        - link "Providers" [ref=f2e17] [cursor=pointer]:
+          - /url: /providers
+        - link "Compute" [ref=f2e18] [cursor=pointer]:
+          - /url: /compute
+      - generic [ref=f2e19]:
+        - generic [ref=f2e20]:
+          - generic [ref=f2e21]: models
+          - generic [ref=f2e22]: "467"
+        - generic [ref=f2e23]:
+          - generic [ref=f2e24]: price pts
+          - generic [ref=f2e25]: 4.5K
+        - generic [ref=f2e26]:
+          - generic [ref=f2e27]: synced
+          - generic [ref=f2e28]: 10m ago
+  - main [ref=f2e29]:
+    - generic [ref=f2e37]:
+      - generic [ref=f2e38]:
+        - generic [ref=f2e39]: Prices sliding — repricing pressure
+        - heading "What the world pays for AI inference." [level=1] [ref=f2e41]
+        - paragraph [ref=f2e42]: Every hour this tool scrapes OpenRouter's public pricing and usage — 431 live models across 4545 price points — to measure spend, throughput, and where prices are moving across the model market.
+        - generic [ref=f2e43]:
+          - generic [ref=f2e44]:
+            - text: Coverage
+            - generic [ref=f2e45]: 110 days
+          - generic [ref=f2e46]:
+            - text: Last sync
+            - generic [ref=f2e47]: 10m ago
+          - generic [ref=f2e48]:
+            - text: Models tracked
+            - generic [ref=f2e49]: "467"
+      - generic [ref=f2e50]:
+        - generic [ref=f2e51]:
+          - generic [ref=f2e52]:
+            - generic [ref=f2e53]: Estimated daily spend & throughput
+            - generic [ref=f2e54]: tokens × effective paid rate · last 120 days · paid models only
+          - generic [ref=f2e55]:
+            - generic [ref=f2e56]: spend
+            - generic [ref=f2e58]: tokens
+            - generic [ref=f2e60]:
+              - button "Paid" [ref=f2e61] [cursor=pointer]
+              - button "+ Free" [ref=f2e62] [cursor=pointer]
+        - generic [ref=f2e65]:
+          - img:
+            - generic:
+              - generic:
+                - generic:
+                  - generic: May 312026
+                  - generic: Jun 14
+                  - generic: Jun 28
+                  - generic: Jul 12
+                  - generic: Jul 26
+                  - generic: Aug 9
+                  - generic: Aug 23
+                - generic:
+                  - generic: $0.0
+                  - generic: $1.0M
+                  - generic: $2.0M
+                  - generic: $3.0M
+                  - generic: $4.0M
+                - generic:
+                  - generic:
+                    - generic: 5.0T
+                    - generic: 10T
+                    - generic: 15T
+    - generic [ref=f2e83]:
+      - generic [ref=f2e84]:
+        - generic [ref=f2e85]:
+          - generic [ref=f2e86]: Weekly spend & tokens · Mon–Sun
+          - generic [ref=f2e87]: est. $/week (left axis) · tokens/week (right axis) · last full week $21.78M (-7.1% w/w)
+        - generic [ref=f2e88]:
+          - button "Est. spend" [ref=f2e89] [cursor=pointer]
+          - button "Tokens" [ref=f2e90] [cursor=pointer]
+          - button "Both" [ref=f2e91] [cursor=pointer]
+      - generic [ref=f2e94]:
+        - img:
+          - generic:
+            - generic:
+              - generic:
+                - generic: May 18
+                - generic: May 25
+                - generic: Jun 1
+                - generic: Jun 8
+                - generic: Jun 15
+                - generic: Jun 22
+                - generic: Jun 29
+                - generic: Jul 6
+                - generic: Jul 13
+                - generic: Jul 20
+                - generic: Jul 27
+                - generic: Aug 3
+                - generic: Aug 10
+                - generic: Aug 17
+                - generic: Aug 24
+                - generic: Aug 31
+              - generic:
+                - generic: $0.0
+                - generic: $5.0M
+                - generic: $10M
+                - generic: $15M
+                - generic: $20M
+                - generic: $25M
+              - generic:
+                - generic:
+                  - generic: "0.0"
+                  - generic: 20T
+                  - generic: 40T
+                  - generic: 60T
+                  - generic: 80T
+                  - generic: 100T
+        - img:
+          - generic [ref=f2e115]:
+            - generic [ref=f2e116]:
+              - generic [ref=f2e117]: Mon
+              - generic [ref=f2e122] [cursor=pointer]
+            - generic [ref=f2e123]:
+              - generic [ref=f2e124]: Tue
+              - generic [ref=f2e129] [cursor=pointer]
+            - generic [ref=f2e130]:
+              - generic [ref=f2e131]: Wed
+              - generic [ref=f2e136] [cursor=pointer]
+            - generic [ref=f2e137]:
+              - generic [ref=f2e138]: Thu
+              - generic [ref=f2e143] [cursor=pointer]
+            - generic [ref=f2e144]:
+              - generic [ref=f2e145]: Fri
+              - generic [ref=f2e150] [cursor=pointer]
+            - generic [ref=f2e151]:
+              - generic [ref=f2e152]: Sat
+              - generic [ref=f2e157] [cursor=pointer]
+            - generic [ref=f2e158]:
+              - generic [ref=f2e159]: Sun
+              - generic [ref=f2e164] [cursor=pointer]
+      - generic [ref=f2e165]:
+        - generic [ref=f2e168]:
+          - text: Week of 2026-08-31 tracking to
+          - generic [ref=f2e169]:
+            - text: $25.10M
+            - generic [ref=f2e170]: +15.3%
+          - generic [ref=f2e171]:
+            - text: · 100.19T tok
+            - generic [ref=f2e172]: +23.8%
+          - text: vs last full week
+        - generic [ref=f2e173]: $15.64M booked over 4 days ÷ 62% — the share of a normal week those weekdays carry, learned from the last 8 complete weeks with the newest counting heaviest (a weekend day runs 26% below a weekday, so the days still to come are not counted flat). OpenRouter publishes complete days only, so today is not booked yet and rides entirely on the projection.
+    - generic [ref=f2e174]:
+      - generic [ref=f2e175]:
+        - generic [ref=f2e176]: Est. daily spend
+        - generic [ref=f2e178]: $4.34M
+        - generic [ref=f2e179]: $4,341,805 / day
+      - generic [ref=f2e185]:
+        - generic [ref=f2e186]: Daily tokens
+        - generic [ref=f2e188]: 18.57Ttok
+        - generic [ref=f2e189]: across 431 models
+      - generic [ref=f2e195]:
+        - generic [ref=f2e196]: Price index (wgt.)
+        - generic [ref=f2e198]: $0.752/M
+        - generic [ref=f2e199]: ▼ 42.4% over window
+      - generic [ref=f2e205]:
+        - generic [ref=f2e206]: Cheapest frontier
+        - generic [ref=f2e208]: $0.039/M
+        - generic [ref=f2e209]: 27 models are free
+    - generic [ref=f2e212]:
+      - generic [ref=f2e213]:
+        - generic [ref=f2e214]:
+          - generic [ref=f2e215]: Price index over time
+          - generic [ref=f2e216]: usage-weighted vs median input $/Mtok · daily close
+        - generic [ref=f2e217]:
+          - button "Price index" [ref=f2e218] [cursor=pointer]
+          - button "vs compute" [ref=f2e219] [cursor=pointer]
+      - generic [ref=f2e222]:
+        - img:
+          - generic:
+            - generic:
+              - generic:
+                - generic: May 312026
+                - generic: Jun 14
+                - generic: Jun 28
+                - generic: Jul 12
+                - generic: Jul 26
+                - generic: Aug 9
+                - generic: Aug 23
+              - generic:
+                - generic: $0.5
+                - generic: $1
+                - generic: $1.5
+    - generic [ref=f2e238]:
+      - generic [ref=f2e239]:
+        - generic [ref=f2e240]:
+          - generic [ref=f2e241]: The model race
+          - generic [ref=f2e242]: est. spend per day · one point per day · one bar per lab · top models named, the rest of the top 50 as a pale cap · last 28 days
+        - generic [ref=f2e243]:
+          - generic [ref=f2e244]:
+            - button "Est. spend" [ref=f2e245] [cursor=pointer]
+            - button "Tokens" [ref=f2e246] [cursor=pointer]
+          - generic [ref=f2e247]:
+            - button "Daily" [ref=f2e248] [cursor=pointer]
+            - button "Weekly" [ref=f2e249] [cursor=pointer]
+          - generic [ref=f2e250]:
+            - button "Lines" [ref=f2e251] [cursor=pointer]
+            - button "Bars · by lab" [ref=f2e252] [cursor=pointer]
+      - generic [ref=f2e255]:
+        - img:
+          - generic:
+            - generic:
+              - generic:
+                - generic: Aug 92026
+                - generic: Aug 16
+                - generic: Aug 23
+                - generic: Aug 30
+              - generic:
+                - generic: $0.0
+                - generic: $500k
+                - generic: $1.0M
+                - generic: $1.5M
+                - generic: $2.0M
+        - img:
+          - generic [ref=f2e271]:
+            - generic [ref=f2e272]:
+              - generic [ref=f2e273]:
+                - generic [ref=f2e274]: Anthropic
+                - generic [ref=f2e275] [cursor=pointer]
+              - generic [ref=f2e276]:
+                - generic [ref=f2e277]: Anthropic · +3 more
+                - generic [ref=f2e282] [cursor=pointer]
+              - generic [ref=f2e283]:
+                - generic [ref=f2e284]: claude-opus-4.7
+                - generic [ref=f2e289] [cursor=pointer]
+              - generic [ref=f2e290]:
+                - generic [ref=f2e291]: claude-sonnet-5
+                - generic [ref=f2e296] [cursor=pointer]
+              - generic [ref=f2e297]:
+                - generic [ref=f2e298]: claude-sonnet-4.6
+                - generic [ref=f2e303] [cursor=pointer]
+              - generic [ref=f2e304]:
+                - generic [ref=f2e305]: claude-opus-4.8
+                - generic [ref=f2e310] [cursor=pointer]
+              - generic [ref=f2e311]:
+                - generic [ref=f2e312]: claude-fable-5
+                - generic [ref=f2e317] [cursor=pointer]
+              - generic [ref=f2e318]:
+                - generic [ref=f2e319]: claude-opus-5
+                - generic [ref=f2e324] [cursor=pointer]
+            - generic [ref=f2e325]:
+              - generic [ref=f2e326]:
+                - generic [ref=f2e327]: OpenAI
+                - generic [ref=f2e328] [cursor=pointer]
+              - generic [ref=f2e329]:
+                - generic [ref=f2e330]: OpenAI · +12 more
+                - generic [ref=f2e335] [cursor=pointer]
+              - generic [ref=f2e336]:
+                - generic [ref=f2e337]: gpt-5.6-luna
+                - generic [ref=f2e342] [cursor=pointer]
+              - generic [ref=f2e343]:
+                - generic [ref=f2e344]: gpt-5.5
+                - generic [ref=f2e349] [cursor=pointer]
+              - generic [ref=f2e350]:
+                - generic [ref=f2e351]: gpt-5.6-terra
+                - generic [ref=f2e356] [cursor=pointer]
+              - generic [ref=f2e357]:
+                - generic [ref=f2e358]: gpt-5.6-sol
+                - generic [ref=f2e363] [cursor=pointer]
+            - generic [ref=f2e364]:
+              - generic [ref=f2e365]:
+                - generic [ref=f2e366]: Google
+                - generic [ref=f2e367] [cursor=pointer]
+              - generic [ref=f2e368]:
+                - generic [ref=f2e369]: Google · +10 more
+                - generic [ref=f2e374] [cursor=pointer]
+              - generic [ref=f2e375]:
+                - generic [ref=f2e376]: gemini-3.1-pro-preview
+                - generic [ref=f2e381] [cursor=pointer]
+            - generic [ref=f2e382]:
+              - generic [ref=f2e383]:
+                - generic [ref=f2e384]: X.AI
+                - generic [ref=f2e385] [cursor=pointer]
+              - generic [ref=f2e386]:
+                - generic [ref=f2e387]: X.AI · +2 more
+                - generic [ref=f2e392] [cursor=pointer]
+              - generic [ref=f2e393]:
+                - generic [ref=f2e394]: grok-4.6
+                - generic [ref=f2e399] [cursor=pointer]
+            - generic [ref=f2e400]:
+              - generic [ref=f2e401]:
+                - generic [ref=f2e402]: Z.AI
+                - generic [ref=f2e403] [cursor=pointer]
+              - generic [ref=f2e404]:
+                - generic [ref=f2e405]: Z.AI · +4 more
+                - generic [ref=f2e410] [cursor=pointer]
+              - generic [ref=f2e411]:
+                - generic [ref=f2e412]: glm-5.2
+                - generic [ref=f2e417] [cursor=pointer]
+            - generic [ref=f2e418]:
+              - generic [ref=f2e419]:
+                - generic [ref=f2e420]: Others
+                - generic [ref=f2e421] [cursor=pointer]
+              - generic [ref=f2e422]:
+                - generic [ref=f2e423]: Others · +15 more
+                - generic [ref=f2e428] [cursor=pointer]
+              - generic [ref=f2e429]:
+                - generic [ref=f2e430]: deepseek-v4-flash-0731
+                - generic [ref=f2e435] [cursor=pointer]
+              - generic [ref=f2e436]:
+                - generic [ref=f2e437]: deepseek-v4-pro
+                - generic [ref=f2e442] [cursor=pointer]
+              - generic [ref=f2e443]:
+                - generic [ref=f2e444]: kimi-k3
+                - generic [ref=f2e449] [cursor=pointer]
+    - generic [ref=f2e452]:
+      - generic [ref=f2e453]: Order flow
+      - heading "Who moves the tokens" [level=2] [ref=f2e454]
+    - generic [ref=f2e455]:
+      - generic [ref=f2e456]:
+        - generic [ref=f2e457]:
+          - generic [ref=f2e458]: Top models · Sep 3
+          - generic [ref=f2e459]: by est. daily spend (tokens × effective rate) · last complete day
+        - generic [ref=f2e460]:
+          - generic "Claude Opus 5 — $407.2K (63%) Claude Opus 4.8 — $135.0K (21%) Claude Opus 4.6 — $59.6K (9%) Claude Opus 4.7 — $24.3K (4%) Claude Opus 4.5 — $19.7K (3%)" [ref=f2e461] [cursor=pointer]:
+            - generic [ref=f2e462]: "1"
+            - generic [ref=f2e463]: Claude Opus · 5 models
+            - generic [ref=f2e466]: $645.7K · 374.52B tok
+          - generic "Gemini 3.7 Flash — $139.0K (34%) Gemini 3.8 Flash — $81.6K (20%) Gemini 3 Flash Preview — $58.2K (14%) Gemini 3.5 Flash — $40.9K (10%) Gemini 2.5 Flash — $29.8K (7%) Gemini 3.6 Flash — $21.2K (5%) Gemini 3.1 Flash Lite — $17.5K (4%) Gemini 2.5 Flash Lite — $11.9K (3%) Gemini 3.5 Flash Lite — $7.3K (2%) Gemini 3.1 Flash Lite Preview — $5.7K (1%)" [ref=f2e467] [cursor=pointer]:
+            - generic [ref=f2e468]: "2"
+            - generic [ref=f2e469]: Gemini Flash · 10 models
+            - generic [ref=f2e472]: $413.2K · 1.16T tok
+          - generic "GLM 5.3 — $202.9K (52%) GLM 5.2 — $185.0K (48%)" [ref=f2e473] [cursor=pointer]:
+            - generic [ref=f2e474]: "3"
+            - generic [ref=f2e475]: GLM 5.2 + 5.3 · 2 models
+            - generic [ref=f2e478]: $387.9K · 958.78B tok
+          - generic "Claude Sonnet 4.6 — $173.8K (46%) Claude Sonnet 5 — $168.3K (45%) Claude Sonnet 4.5 — $25.7K (7%) Claude Sonnet 4 — $9.7K (3%)" [ref=f2e479] [cursor=pointer]:
+            - generic [ref=f2e480]: "4"
+            - generic [ref=f2e481]: Claude Sonnet · 4 models
+            - generic [ref=f2e484]: $377.6K · 423.94B tok
+          - generic [ref=f2e485] [cursor=pointer]:
+            - generic [ref=f2e486]: "5"
+            - generic [ref=f2e487]: Hy4 preview
+            - generic [ref=f2e490]: $329.9K · 2.99T tok
+          - generic [ref=f2e491] [cursor=pointer]:
+            - generic [ref=f2e492]: "6"
+            - generic [ref=f2e493]: GPT-5.6 Sol
+            - generic [ref=f2e496]: $325.3K · 383.68B tok
+          - generic [ref=f2e497] [cursor=pointer]:
+            - generic [ref=f2e498]: "7"
+            - generic [ref=f2e499]: Kimi K3
+            - generic [ref=f2e502]: $255.6K · 341.42B tok
+          - generic "Claude Fable 5.1 — $143.7K (62%) Claude Fable 5 — $88.9K (38%)" [ref=f2e503] [cursor=pointer]:
+            - generic [ref=f2e504]: "8"
+            - generic [ref=f2e505]: Claude Fable · 2 models
+            - generic [ref=f2e508]: $232.6K · 97.08B tok
+          - generic "DeepSeek V4 Flash 0731 — $87.6K (58%) DeepSeek V4 Flash 0423 — $48.2K (32%) DeepSeek V4 Flash Vision Exp — $15.8K (10%)" [ref=f2e509] [cursor=pointer]:
+            - generic [ref=f2e510]: "9"
+            - generic [ref=f2e511]: DeepSeek V4 Flash · 3 models
+            - generic [ref=f2e514]: $151.5K · 2.77T tok
+          - generic "DeepSeek V4 Pro 0423 — $76.5K (65%) DeepSeek V4 Pro 0813 — $41.7K (35%)" [ref=f2e515] [cursor=pointer]:
+            - generic [ref=f2e516]: "10"
+            - generic [ref=f2e517]: DeepSeek V4 Pro · 2 models
+            - generic [ref=f2e520]: $118.2K · 357.46B tok
+          - generic [ref=f2e521] [cursor=pointer]:
+            - generic [ref=f2e522]: "11"
+            - generic [ref=f2e523]: GPT-5.6 Luna
+            - generic [ref=f2e526]: $115.0K · 1.44T tok
+          - generic "GLM 5.3 Flash — $92.0K (100%)" [ref=f2e527] [cursor=pointer]:
+            - generic [ref=f2e528]: "12"
+            - generic [ref=f2e529]: GLM Flash · 1 model
+            - generic [ref=f2e532]: $92.0K · 1.89T tok
+          - generic [ref=f2e533] [cursor=pointer]:
+            - generic [ref=f2e534]: "13"
+            - generic [ref=f2e535]: Gemini 3.1 Pro Preview
+            - generic [ref=f2e538]: $78.9K · 30.43B tok
+          - generic [ref=f2e539] [cursor=pointer]:
+            - generic [ref=f2e540]: "14"
+            - generic [ref=f2e541]: GPT-5.6 Terra
+            - generic [ref=f2e544]: $69.7K · 101.70B tok
+          - generic [ref=f2e545] [cursor=pointer]:
+            - generic [ref=f2e546]: "15"
+            - generic [ref=f2e547]: Grok 4.6
+            - generic [ref=f2e550]: $58.9K · 48.59B tok
+      - generic [ref=f2e551]:
+        - generic [ref=f2e552]:
+          - generic [ref=f2e553]:
+            - generic [ref=f2e554]: Top apps · latest day
+            - generic [ref=f2e555]: est. spend — day tokens × each app's 30-day rate · * = fleet-average rate (1)
+          - generic [ref=f2e556]:
+            - button "Day" [ref=f2e557] [cursor=pointer]
+            - button "30 days" [ref=f2e558] [cursor=pointer]
+        - generic [ref=f2e559]:
+          - generic [ref=f2e560]:
+            - generic [ref=f2e561]: "1"
+            - generic [ref=f2e562]: Claude Code
+            - generic [ref=f2e565]: $539.2K · 768.97B tok
+          - generic [ref=f2e566]:
+            - generic [ref=f2e567]: "2"
+            - generic [ref=f2e568]: Hermes Agent
+            - generic [ref=f2e571]: $320.3K · 1.58T tok
+          - generic [ref=f2e572]:
+            - generic [ref=f2e573]: "3"
+            - generic [ref=f2e574]: Codex
+            - generic [ref=f2e577]: $158.7K · 272.01B tok
+          - generic [ref=f2e578]:
+            - generic [ref=f2e579]: "4"
+            - generic [ref=f2e580]: pi
+            - generic [ref=f2e583]: $108.8K · 270.43B tok
+          - generic [ref=f2e584]:
+            - generic [ref=f2e585]: "5"
+            - generic [ref=f2e586]: OpenClaw
+            - generic [ref=f2e589]: $98.5K · 173.26B tok
+          - generic [ref=f2e590]:
+            - generic [ref=f2e591]: "6"
+            - generic [ref=f2e592]: Janitor AI
+            - generic [ref=f2e595]: $87.7K · 33.83B tok
+          - generic [ref=f2e596]:
+            - generic [ref=f2e597]: "7"
+            - generic [ref=f2e598]: Framer
+            - generic [ref=f2e601]: $50.7K · 56.28B tok
+          - generic [ref=f2e602]:
+            - generic [ref=f2e603]: "8"
+            - generic [ref=f2e604]: omp
+            - generic [ref=f2e607]: $45.1K · 204.27B tok
+          - generic [ref=f2e608]:
+            - generic [ref=f2e609]: "9"
+            - generic [ref=f2e610]: DeepSeek Harness *
+            - generic [ref=f2e613]: $39.0K · 117.27B tok
+          - generic [ref=f2e614]:
+            - generic [ref=f2e615]: "10"
+            - generic [ref=f2e616]: Descript
+            - generic [ref=f2e619]: $35.3K · 42.16B tok
+          - generic [ref=f2e620]:
+            - generic [ref=f2e621]: "11"
+            - generic [ref=f2e622]: Kilo Code
+            - generic [ref=f2e625]: $32.3K · 446.96B tok
+          - generic [ref=f2e626]:
+            - generic [ref=f2e627]: "12"
+            - generic [ref=f2e628]: Cline
+            - generic [ref=f2e631]: $31.2K · 375.26B tok
+          - generic [ref=f2e632]:
+            - generic [ref=f2e633]: "13"
+            - generic [ref=f2e634]: HighLevel
+            - generic [ref=f2e637]: $25.8K · 54.06B tok
+          - generic [ref=f2e638]:
+            - generic [ref=f2e639]: "14"
+            - generic [ref=f2e640]: Zazen (Freebuff fork)
+            - generic [ref=f2e643]: $20.8K · 259.91B tok
+          - generic [ref=f2e644]:
+            - generic [ref=f2e645]: "15"
+            - generic [ref=f2e646]: Portkey AI
+            - generic [ref=f2e649]: $16.9K · 49.72B tok
+    - generic [ref=f2e651]:
+      - generic [ref=f2e652]:
+        - generic [ref=f2e653]:
+          - generic [ref=f2e654]: Model families over time
+          - generic [ref=f2e655]: stacked est. spend per day · versions of one line summed · top 8 families, the rest pooled · the shaded tail is today, still counting
+        - generic [ref=f2e656]:
+          - generic [ref=f2e657]:
+            - button "Est. spend" [ref=f2e658] [cursor=pointer]
+            - button "Tokens" [ref=f2e659] [cursor=pointer]
+          - generic [ref=f2e660]:
+            - button "Daily" [ref=f2e661] [cursor=pointer]
+            - button "Weekly" [ref=f2e662] [cursor=pointer]
+      - generic [ref=f2e665]:
+        - img:
+          - generic:
+            - generic:
+              - generic:
+                - generic: Jun 282026
+                - generic: Jul 12
+                - generic: Jul 26
+                - generic: Aug 9
+                - generic: Aug 23
+              - generic:
+                - generic: $0
+                - generic: $1M
+                - generic: $2M
+                - generic: $3M
+                - generic: $4M
+        - img:
+          - generic [ref=f2e682]:
+            - generic [ref=f2e683]:
+              - generic [ref=f2e684]: +40 more
+              - generic [ref=f2e688] [cursor=pointer]
+            - generic [ref=f2e689]:
+              - generic [ref=f2e690]: kimi-k3
+              - generic [ref=f2e694] [cursor=pointer]
+            - generic [ref=f2e695]:
+              - generic [ref=f2e696]: gpt-5.6-sol
+              - generic [ref=f2e700] [cursor=pointer]
+            - generic [ref=f2e701]:
+              - generic [ref=f2e702]: gpt-5.5
+              - generic [ref=f2e706] [cursor=pointer]
+            - generic [ref=f2e707]:
+              - generic [ref=f2e708]: GLM 5.2 + 5.3
+              - generic [ref=f2e712] [cursor=pointer]
+            - generic [ref=f2e713]:
+              - generic [ref=f2e714]: Claude Fable
+              - generic [ref=f2e718] [cursor=pointer]
+            - generic [ref=f2e719]:
+              - generic [ref=f2e720]: Gemini Flash
+              - generic [ref=f2e724] [cursor=pointer]
+            - generic [ref=f2e725]:
+              - generic [ref=f2e726]: Claude Sonnet
+              - generic [ref=f2e730] [cursor=pointer]
+            - generic [ref=f2e731]:
+              - generic [ref=f2e732]: Claude Opus
+              - generic [ref=f2e736] [cursor=pointer]
+  - contentinfo [ref=f2e33]:
+    - generic [ref=f2e34]: Estimated figures derived from public OpenRouter data, refreshed hourly. Spend is an estimate (tokens × observed effective rates, incl. cache discounts), not billed revenue; per-provider price history accumulates going forward.
+    - link "github.com/scx1332/token-tracker" [ref=f2e36] [cursor=pointer]:
+      - /url: https://github.com/scx1332/token-tracker
