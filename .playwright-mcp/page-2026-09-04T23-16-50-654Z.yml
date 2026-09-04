@@ -1,0 +1,34 @@
+- generic [ref=e3]:
+  - banner [ref=e4]:
+    - generic [ref=e5]:
+      - link "TokenExchange" [ref=e6] [cursor=pointer]:
+        - /url: /
+      - navigation [ref=e12]:
+        - link "Market" [ref=e13] [cursor=pointer]:
+          - /url: /
+        - link "Model Race" [ref=e14] [cursor=pointer]:
+          - /url: /race
+        - link "Price Explorer" [ref=e15] [cursor=pointer]:
+          - /url: /explorer
+        - link "Models" [ref=e16] [cursor=pointer]:
+          - /url: /models
+        - link "Providers" [ref=e17] [cursor=pointer]:
+          - /url: /providers
+        - link "Compute" [ref=e18] [cursor=pointer]:
+          - /url: /compute
+      - generic [ref=e19]:
+        - generic [ref=e20]:
+          - generic [ref=e21]: models
+          - generic [ref=e22]: —
+        - generic [ref=e23]:
+          - generic [ref=e24]: price pts
+          - generic [ref=e25]: —
+        - generic [ref=e26]:
+          - generic [ref=e27]: synced
+          - generic [ref=e28]: —
+  - main [ref=e29]:
+    - generic [ref=e30]: Loading market data…
+  - contentinfo [ref=e33]:
+    - generic [ref=e34]: Estimated figures derived from public OpenRouter data, refreshed hourly. Spend is an estimate (tokens × observed effective rates, incl. cache discounts), not billed revenue; per-provider price history accumulates going forward.
+    - link "github.com/scx1332/token-tracker" [ref=e36] [cursor=pointer]:
+      - /url: https://github.com/scx1332/token-tracker

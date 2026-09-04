@@ -101,6 +101,8 @@ export interface RankItem {
   frac: number; // 0..1 bar width
   href?: string;
   color?: string;
+  /** Native tooltip — the row's detail, e.g. what a grouped family is made of. */
+  title?: string;
 }
 
 export function RankList({ items, onNavigate }: { items: RankItem[]; onNavigate?: (href: string) => void }) {
@@ -110,6 +112,7 @@ export function RankList({ items, onNavigate }: { items: RankItem[]; onNavigate?
         <div
           key={i}
           className="rank-row"
+          title={it.title}
           style={it.href ? { cursor: "pointer" } : undefined}
           onClick={it.href && onNavigate ? () => onNavigate(it.href!) : undefined}
         >

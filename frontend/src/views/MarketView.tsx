@@ -9,6 +9,7 @@ import {
   ComputeVsTokensChart,
   ProviderRevenueChart,
   PROVIDER_COLORS,
+  escapeHtml,
   C,
 } from "../charts";
 import { usd, usdExact, compact, mtok, relTime, seriesChange, displayName, pct, shortDate } from "../format";
@@ -17,7 +18,7 @@ import { RacePanel, RACE_PINS, RACE_SINCE } from "./RacePanel";
 import { closedOnly, isClosedDay } from "../runningDay";
 import { rankAppsByDaySpend } from "../apps";
 import { buildComparison } from "../gpu";
-import { familySeries, groupByFamily } from "../family";
+import { breakdownAt, familySeries, groupByFamily } from "../family";
 import type { GpuDailyRow, RacePoint } from "../api";
 
 /** The accelerator the market view overlays by default — today's flagship. */
@@ -171,6 +172,14 @@ export function MarketView({ navigate }: { navigate: (to: string) => void }) {
       name: f.members.length > 1 ? `${f.label} · ${f.members.length} models` : f.label,
       value: f.spendUsd,
       valueLabel: `${usd(f.spendUsd)} · ${compact(f.tokens)} tok`,
+      // Hovering a grouped row shows the split it is hiding.
+      ...(f.members.length > 1
+        ? {
+            title: f.members
+              .map((m) => `${m.name} — ${usd(m.spendUsd)} (${(((m.spendUsd ?? 0) / (f.spendUsd || 1)) * 100).toFixed(0)}%)`)
+              .join("\n"),
+          }
+        : {}),
       frac: f.spendUsd / (max || 1),
       // Multi-model rows have no page of their own, so they open their biggest
       // member — the one the name is really about.
@@ -187,11 +196,18 @@ export function MarketView({ navigate }: { navigate: (to: string) => void }) {
     (p) => p.date >= RACE_SINCE,
   );
   const familyStack = familySeries(familyPoints, familyMode, 8);
+  const familyFmt = (v: number) => (familyMode === "spend" ? usd(v) : `${compact(v)} tok`);
   const familyTraces = familyStack.series.map((s, i) => ({
     name: s.label,
     x: familyStack.dates,
     y: s.values as (number | null)[],
     color: s.key === "__others" ? C.faint : PROVIDER_COLORS[i % PROVIDER_COLORS.length]!,
+    // What that band is made of on that date, each part with its share of the
+    // band — the whole point of summing versions is being able to unfold them.
+    hover: familyStack.dates.map((_, di) => {
+      const lines = breakdownAt(s, di, familyFmt);
+      return lines.length ? `<br>${lines.map((l) => escapeHtml(l)).join("<br>")}` : "";
+    }),
   }));
 
   // Per-app spend is assembled from per-model app leaderboards (OpenRouter

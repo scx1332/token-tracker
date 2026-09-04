@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { familyOf, familySeries, groupByFamily } from "./family";
+import { breakdownAt, familyOf, familySeries, groupByFamily } from "./family";
 
 const key = (id: string) => familyOf(id).key;
 
@@ -132,5 +132,52 @@ describe("familySeries", () => {
   it("shortens a slug label to the model half", () => {
     const { series } = familySeries(points, "spend", 3);
     expect(series.map((s) => s.label)).toEqual(["Claude Opus", "gpt-5.6-sol", "grok-4.6"]);
+  });
+});
+
+describe("breakdownAt", () => {
+  const fmt = (v: number) => `$${v}`;
+  const points = [
+    {
+      date: "2026-08-03",
+      spendByModel: { "anthropic/claude-opus-5": 60, "anthropic/claude-opus-4.8": 30, "anthropic/claude-opus-4.7": 10, "z-ai/glm-5.2": 5 },
+      tokensByModel: {},
+    },
+    {
+      date: "2026-08-10",
+      spendByModel: { "anthropic/claude-opus-5": 100, "z-ai/glm-5.2": 5 },
+      tokensByModel: {},
+    },
+  ];
+  const opus = familySeries(points, "spend", 5).series.find((s) => s.key === "claude-opus")!;
+
+  it("splits a band into its members with shares of that bucket", () => {
+    expect(breakdownAt(opus, 0, fmt)).toEqual([
+      "claude-opus-5 $60 · 60%",
+      "claude-opus-4.8 $30 · 30%",
+      "claude-opus-4.7 $10 · 10%",
+    ]);
+  });
+
+  it("drops members that were silent, and says nothing when one is left", () => {
+    expect(breakdownAt(opus, 1, fmt)).toEqual([]);
+  });
+
+  it("caps the rows and pools the tail", () => {
+    const many = {
+      key: "k",
+      label: "k",
+      values: [100],
+      members: [50, 20, 10, 8, 5, 4, 2, 1].map((v, i) => ({ label: `m${i}`, values: [v] })),
+    };
+    const lines = breakdownAt(many, 0, fmt, 3);
+    expect(lines).toEqual(["m0 $50 · 50%", "m1 $20 · 20%", "m2 $10 · 10%", "+5 more $20 · 20%"]);
+  });
+
+  it("says nothing for a one-model family or an empty bucket", () => {
+    const solo = familySeries(points, "spend", 5).series.find((s) => s.key === "glm-5.2-5.3")!;
+    expect(solo.members).toEqual([]);
+    expect(breakdownAt(solo, 0, fmt)).toEqual([]);
+    expect(breakdownAt({ key: "k", label: "k", values: [0], members: [] }, 0, fmt)).toEqual([]);
   });
 });

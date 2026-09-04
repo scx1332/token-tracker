@@ -1337,7 +1337,7 @@ export function ProviderRevenueChart({
   benchmark = null,
   nowMs = Date.now(),
 }: {
-  traces: { name: string; x: string[]; y: (number | null)[]; color: string }[];
+  traces: { name: string; x: string[]; y: (number | null)[]; color: string; hover?: string[] }[];
   mode: "spend" | "tokens";
   height?: number;
   benchmark?: { name: string; x: string[]; y: (number | null)[] } | null;
@@ -1359,7 +1359,13 @@ export function ProviderRevenueChart({
       stackgroup: "one",
       line: { width: 0.6, color: t.color },
       fillcolor: hexToRgba(t.color, 0.55),
-      hovertemplate: `${mode === "spend" ? "$%{y:.3~s}" : "%{y:.3~s} tok"} · ${escapeHtml(t.name)}<extra></extra>`,
+      // `hover` carries the band's own breakdown for that point (already
+      // escaped by the caller, which knows what the parts are); without it the
+      // tooltip is just the stacked value and the band's name.
+      ...(t.hover ? { text: t.hover } : {}),
+      hovertemplate: `${mode === "spend" ? "$%{y:.3~s}" : "%{y:.3~s} tok"} · ${escapeHtml(t.name)}${
+        t.hover ? "%{text}" : ""
+      }<extra></extra>`,
     }));
     // No stackgroup: the reference line reads absolute, not stacked on top.
     if (benchmark) {
@@ -1424,7 +1430,8 @@ function fmtPrice(v: number): string {
   return v.toFixed(0);
 }
 
-function escapeHtml(s: string): string {
+/** Plotly hover strings are HTML — escape anything that came from data. */
+export function escapeHtml(s: string): string {
   return s.replace(/[&<>]/g, (c) => (c === "&" ? "&amp;" : c === "<" ? "&lt;" : "&gt;"));
 }
 

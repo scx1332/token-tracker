@@ -86,6 +86,19 @@ export function groupByFamily<T extends { modelId: string; name?: string; tokens
   return [...byKey.values()].sort((a, b) => b.spendUsd - a.spendUsd || b.tokens - a.tokens);
 }
 
+export interface FamilySeries {
+  key: string;
+  label: string;
+  /** One value per bucket; a bucket the family was silent in is 0, not a gap. */
+  values: number[];
+  /**
+   * What the band is made of, biggest first over the window — the models in
+   * the family, or for the pooled band the families it swallowed. Each carries
+   * its own per-bucket values so a tooltip can show the split at that date.
+   */
+  members: { label: string; values: number[] }[];
+}
+
 /**
  * Fold a race series (per-model totals per bucket) into per-family series:
  * the top `topN` families by window total, plus everything else summed into
@@ -95,12 +108,14 @@ export function familySeries(
   points: { date: string; spendByModel: Record<string, number>; tokensByModel: Record<string, number> }[],
   mode: "spend" | "tokens",
   topN = 8,
-): { dates: string[]; series: { key: string; label: string; values: number[] }[] } {
+): { dates: string[]; series: FamilySeries[] } {
   const dates = points.map((p) => p.date);
   const valuesAt = (p: (typeof points)[number]) => (mode === "spend" ? p.spendByModel : p.tokensByModel) ?? {};
   const labels = new Map<string, string>();
   const totals = new Map<string, number>();
   const perBucket = points.map(() => new Map<string, number>());
+  // Per family, the models inside it — kept so a band can explain itself.
+  const membersOf = new Map<string, Map<string, number[]>>();
 
   points.forEach((p, i) => {
     for (const [modelId, raw] of Object.entries(valuesAt(p))) {
@@ -111,30 +126,78 @@ export function familySeries(
       labels.set(fam.key, fam.label);
       totals.set(fam.key, (totals.get(fam.key) ?? 0) + v);
       perBucket[i]!.set(fam.key, (perBucket[i]!.get(fam.key) ?? 0) + v);
+      const members = membersOf.get(fam.key) ?? new Map<string, number[]>();
+      const row = members.get(modelId) ?? new Array(points.length).fill(0);
+      row[i] = (row[i] ?? 0) + v;
+      members.set(modelId, row);
+      membersOf.set(fam.key, members);
     }
   });
 
   const ranked = [...totals.entries()].sort((a, b) => b[1] - a[1]).map(([k]) => k);
   const named = ranked.slice(0, topN);
-  const rest = new Set(ranked.slice(topN));
+  const rest = ranked.slice(topN);
 
-  const series = named.map((key) => ({
+  const sumOf = (values: number[]) => values.reduce((a, b) => a + b, 0);
+  const byWindowTotal = (a: { values: number[] }, b: { values: number[] }) => sumOf(b.values) - sumOf(a.values);
+
+  const series: FamilySeries[] = named.map((key) => ({
     key,
     label: shortLabel(labels.get(key) ?? key),
     values: perBucket.map((b) => b.get(key) ?? 0),
+    // A one-model family explains nothing by listing itself.
+    members:
+      (membersOf.get(key)?.size ?? 0) > 1
+        ? [...(membersOf.get(key) ?? new Map())].map(([modelId, values]) => ({ label: shortLabel(modelId), values })).sort(byWindowTotal)
+        : [],
   }));
-  if (rest.size > 0) {
+  if (rest.length > 0) {
     series.push({
       key: "__others",
-      label: `+${rest.size} more`,
+      label: `+${rest.length} more`,
       values: perBucket.map((b) => {
         let sum = 0;
         for (const key of rest) sum += b.get(key) ?? 0;
         return sum;
       }),
+      // The pooled band is made of whole families, not single models.
+      members: rest
+        .map((key) => ({
+          label: shortLabel(labels.get(key) ?? key),
+          values: perBucket.map((b) => b.get(key) ?? 0),
+        }))
+        .sort(byWindowTotal),
     });
   }
   return { dates, series };
+}
+
+/**
+ * "Claude Opus 5 62% · 4.8 24% · 4.7 14%" — a band's split at one bucket, as
+ * hover lines. Shares are of the band, and a member silent that day is left
+ * out rather than shown as 0%.
+ */
+export function breakdownAt(
+  series: FamilySeries,
+  index: number,
+  fmt: (v: number) => string,
+  maxRows = 6,
+): string[] {
+  const total = series.values[index] ?? 0;
+  if (total <= 0 || series.members.length === 0) return [];
+  const rows = series.members
+    .map((m) => ({ label: m.label, value: m.values[index] ?? 0 }))
+    .filter((r) => r.value > 0)
+    .sort((a, b) => b.value - a.value);
+  if (rows.length < 2) return [];
+  const shown = rows.slice(0, maxRows);
+  const lines = shown.map((r) => `${r.label} ${fmt(r.value)} · ${((r.value / total) * 100).toFixed(0)}%`);
+  const hidden = rows.length - shown.length;
+  if (hidden > 0) {
+    const rest = rows.slice(maxRows).reduce((a, r) => a + r.value, 0);
+    lines.push(`+${hidden} more ${fmt(rest)} · ${((rest / total) * 100).toFixed(0)}%`);
+  }
+  return lines;
 }
 
 /** Slugs make poor legend entries: drop the author, keep the model. */
