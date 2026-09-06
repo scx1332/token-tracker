@@ -5,6 +5,8 @@ import { useMemo } from "react";
 import type { PriceHistoryRow, UsageRow, UsageSeriesPoint } from "./api";
 import type { WeekBucket, WeekDayCell } from "./weekly";
 import { isClosedDay } from "./runningDay";
+import { familyOf } from "./family";
+import { labOf } from "./grouping";
 
 export const Plot = createPlotlyComponent(Plotly);
 
@@ -1108,25 +1110,29 @@ const RACE_COLORS = [C.min, C.teal, C.amber, C.up, C.down, C.violet, "#a83c8f", 
 // everything else stacks into one neutral "Others" bar. Within a family the
 // models ramp from saturated (biggest) to pale — the same trick the weekly
 // bars use for weekdays.
-const RACE_GROUP_ORDER = ["Anthropic", "OpenAI", "Google", "X.AI", "Z.AI", "Others"];
-const RACE_GROUP_COLORS: Record<string, string> = {
+// The bar view stacks the way the Best board's Lab grouping does — labs from
+// `labOf`, product lines from `familyOf` — so the two pages name the same rows.
+// Only the top labs get their own bar; the tail pools into one, because bars
+// stand side by side in a bucket slot and fourteen of them is a texture.
+const RACE_OTHER_LABS = "Other labs";
+const RACE_LAB_COLORS: Record<string, string> = {
   Anthropic: "#c15f3c",
   OpenAI: "#10a37f",
   Google: "#4285f4",
-  "X.AI": "#24292f",
-  "Z.AI": "#6236c9",
-  Others: "#71808f",
+  xAI: "#24292f",
+  "Z.ai": "#6236c9",
+  DeepSeek: "#4d6bfe",
+  Moonshot: "#0f9b8e",
+  Tencent: "#c99a2e",
+  Qwen: "#e0559b",
+  MiniMax: "#d94f4f",
+  [RACE_OTHER_LABS]: "#71808f",
 };
-/** The lab family a model slug stacks under — keyed off the author segment. */
-function raceGroup(modelId: string): string {
-  const author = (modelId.split("/")[0] ?? "").toLowerCase();
-  if (author === "anthropic") return "Anthropic";
-  if (author === "openai") return "OpenAI";
-  if (author === "google") return "Google";
-  if (author === "x-ai" || author === "xai") return "X.AI";
-  if (author === "z-ai" || author === "zhipu") return "Z.AI";
-  return "Others";
-}
+// A lab outside the table still gets a bar of its own if it ranks — a new lab
+// should show up in its own colour rather than borrowing someone's brand.
+const RACE_LAB_FALLBACK = ["#8a6ea8", "#a3763c", "#5a8f5a", "#b0567d", "#4f7c94"];
+const raceLabColor = (lab: string, i: number) =>
+  RACE_LAB_COLORS[lab] ?? RACE_LAB_FALLBACK[i % RACE_LAB_FALLBACK.length]!;
 
 export type RaceMode = "spend" | "tokens";
 export type RaceBucket = "week" | "day";
@@ -1143,11 +1149,12 @@ export type RaceStyle = "line" | "bar";
  * the day it happened rather than smeared across a week bar.
  *
  * `style` picks the mark. Lines let you follow ten trends at a glance without
- * crowding; bars are the additive read — one bar per lab family (Anthropic,
- * OpenAI, Google, X.AI, Z.AI, Others) with that lab's models stacked inside it, so a
- * bar's height is what the lab moved that day and the shade bands say which
- * model carried it. Stacking absorbs a wider field than grouping did, so bar
- * mode takes a larger `topN` than the line view.
+ * crowding, one raw slug each; bars are the additive read, grouped the way the
+ * Best board's Lab tab is — one bar per lab (`labOf`, top `labN` of them, the
+ * tail pooled into "Other labs") with that lab's product lines (`familyOf`)
+ * stacked inside it. A bar's height is what the lab moved that day and the
+ * shade bands say which line carried it. Stacking absorbs a wider field than
+ * grouping did, so bar mode takes a larger `topN` than the line view.
  */
 export function ModelRaceChart({
   points,
@@ -1156,6 +1163,7 @@ export function ModelRaceChart({
   mode = "spend",
   bucket = "week",
   style = "line",
+  labN = 8,
   pinned = [],
   nowMs = Date.now(),
 }: {
@@ -1165,6 +1173,8 @@ export function ModelRaceChart({
   mode?: RaceMode;
   bucket?: RaceBucket;
   style?: RaceStyle;
+  /** Bar view only: how many labs get a bar of their own before the tail pools. */
+  labN?: number;
   /** Bar view only: models named even when they rank outside the top field. */
   pinned?: string[];
   nowMs?: number;
@@ -1195,50 +1205,92 @@ export function ModelRaceChart({
     };
 
     if (style === "bar") {
-      // One bar per lab per bucket, its models stacked inside. The named field
-      // is the overall top plus any pinned models the data carries; within a
-      // lab, members sort by window total so the biggest sits at the bottom of
-      // the stack wearing the most saturated shade. Whatever the payload holds
-      // beyond the named field sums into a pale "+N more" cap on its own lab's
-      // bar, so every stack adds up to that lab's whole tracked book.
-      const named = new Set(top);
-      for (const m of pinned) if (totals.has(m)) named.add(m);
+      // One bar per lab per bucket, its product lines stacked inside — the
+      // same two groupings the Best board's Lab tab uses, so "Claude Opus" is
+      // one segment here as it is one row there. The named field is the top
+      // lines overall plus the line behind any pinned model; within a lab they
+      // sort by window total, so the biggest sits at the bottom of the stack
+      // wearing the most saturated shade. Everything else in that lab sums
+      // into a pale "+N more" cap, so a stack is the lab's whole tracked book.
+      const lineLabel = new Map<string, string>();
+      const labOfLine = new Map<string, string>();
+      const lineTotals = new Map<string, number>();
+      const modelsOfLine = new Map<string, string[]>();
+      for (const [modelId, total] of totals) {
+        const fam = familyOf(modelId);
+        // The race payload carries slugs, not display names: a model standing
+        // alone is named by its slug's model half, a product line by its rule.
+        lineLabel.set(fam.key, fam.key === modelId ? shortSlug(modelId) : fam.label);
+        labOfLine.set(fam.key, labOf(modelId).label);
+        lineTotals.set(fam.key, (lineTotals.get(fam.key) ?? 0) + total);
+        modelsOfLine.set(fam.key, [...(modelsOfLine.get(fam.key) ?? []), modelId]);
+      }
+      const labTotals = new Map<string, number>();
+      for (const [key, total] of lineTotals) {
+        const lab = labOfLine.get(key)!;
+        labTotals.set(lab, (labTotals.get(lab) ?? 0) + total);
+      }
+      const rankedLabs = [...labTotals.entries()].sort((a, b) => b[1] - a[1]).map(([lab]) => lab);
+      const ownBar = new Set(rankedLabs.slice(0, labN));
+      const barOf = (key: string) => {
+        const lab = labOfLine.get(key)!;
+        return ownBar.has(lab) ? lab : RACE_OTHER_LABS;
+      };
+      const barOrder = [...rankedLabs.filter((lab) => ownBar.has(lab)), ...(rankedLabs.length > labN ? [RACE_OTHER_LABS] : [])];
+
+      const named = new Set([...lineTotals.entries()].sort((a, b) => b[1] - a[1]).slice(0, topN).map(([key]) => key));
+      for (const m of pinned) if (totals.has(m)) named.add(familyOf(m).key);
+      // A lab holding a bar of its own always names its biggest line: a bar
+      // that is nothing but a pale cap says who moved the money but not with
+      // what, and a mid-sized lab can miss the overall top field entirely.
+      for (const lab of ownBar) {
+        const biggest = [...lineTotals.entries()]
+          .filter(([key]) => labOfLine.get(key) === lab)
+          .sort((a, b) => b[1] - a[1])[0];
+        if (biggest) named.add(biggest[0]);
+      }
       const membersOf = new Map<string, string[]>();
       const restOf = new Map<string, string[]>();
-      for (const modelId of [...totals.keys()].sort((a, b) => (totals.get(b) ?? 0) - (totals.get(a) ?? 0))) {
-        const g = raceGroup(modelId);
-        const bucket_ = named.has(modelId) ? membersOf : restOf;
-        bucket_.set(g, [...(bucket_.get(g) ?? []), modelId]);
+      for (const key of [...lineTotals.keys()].sort((a, b) => (lineTotals.get(b) ?? 0) - (lineTotals.get(a) ?? 0))) {
+        const bar = barOf(key);
+        const into = named.has(key) ? membersOf : restOf;
+        into.set(bar, [...(into.get(bar) ?? []), key]);
       }
       const fmt = (v: number) => (mode === "spend" ? `$${fmtCompact(v)}` : `${fmtCompact(v)} tok`);
+      // A line's value in a bucket is its models' summed — 0, never a gap, or
+      // the stack misplaces every segment above it.
+      const lineAt = (p: (typeof points)[number], key: string) =>
+        (modelsOfLine.get(key) ?? []).reduce((sum, m) => sum + (Number(values(p)[m]) || 0), 0);
       const traces: Data[] = [];
-      for (const g of RACE_GROUP_ORDER) {
+      barOrder.forEach((g, gi) => {
         const members = membersOf.get(g) ?? [];
         const rest = restOf.get(g) ?? [];
-        if (members.length === 0 && rest.length === 0) continue;
-        const color = RACE_GROUP_COLORS[g]!;
-        const restAt = (p: (typeof points)[number]) =>
-          rest.reduce((sum, m) => sum + (Number(values(p)[m]) || 0), 0);
+        if (members.length === 0 && rest.length === 0) return;
+        const color = raceLabColor(g, gi);
+        const restAt = (p: (typeof points)[number]) => rest.reduce((sum, key) => sum + lineAt(p, key), 0);
         const groupTotal = (p: (typeof points)[number]) =>
-          members.reduce((sum, m) => sum + (Number(values(p)[m]) || 0), 0) + restAt(p);
-        members.forEach((modelId, i) => {
+          members.reduce((sum, key) => sum + lineAt(p, key), 0) + restAt(p);
+        members.forEach((key, i) => {
           const alpha = members.length === 1 ? 0.92 : Math.max(0.33, 0.95 - (i * 0.62) / (members.length - 1));
+          const label = lineLabel.get(key)!;
+          const models = (modelsOfLine.get(key) ?? []).length;
           traces.push(
             barGrouping(
               {
                 type: "bar",
-                name: shortSlug(modelId),
+                // A product line says how many cuts it holds; a lone model
+                // just wears its name.
+                name: models > 1 ? `${label} · ${models}` : label,
                 legendgroup: g,
                 legendgrouptitle: { text: g, font: { family: FONT, size: 10, color } },
                 x,
-                y: points.map((p) => yFor(p, modelId)),
+                y: points.map((p) => lineAt(p, key)),
                 marker: { color: hexToRgba(color, alpha), line: { color: "#ffffff", width: 0.5 } },
                 // Every segment repeats its lab's day total — with per-segment
                 // hover there is no other place to read the stack's height.
                 hovertext: points.map((p) => {
-                  const v = Number(values(p)[modelId]) || 0;
                   const total = groupTotal(p);
-                  return `${shortSlug(modelId)} · ${fmt(v)}${total > 0 ? `<br>${g} total: ${fmt(total)}` : ""}`;
+                  return `${label} · ${fmt(lineAt(p, key))}${total > 0 ? `<br>${g} total: ${fmt(total)}` : ""}`;
                 }),
                 hovertemplate: `%{hovertext}<br>${dateLabel}<extra></extra>`,
               },
@@ -1259,7 +1311,9 @@ export function ModelRaceChart({
                 marker: { color: hexToRgba(color, 0.2), line: { color: "#ffffff", width: 0.5 } },
                 hovertext: points.map((p) => {
                   const total = groupTotal(p);
-                  return `+${rest.length} more ${g} models · ${fmt(restAt(p))}${total > 0 ? `<br>${g} total: ${fmt(total)}` : ""}`;
+                  return `+${rest.length} more ${g === RACE_OTHER_LABS ? "lines" : `${g} lines`} · ${fmt(restAt(p))}${
+                    total > 0 ? `<br>${g} total: ${fmt(total)}` : ""
+                  }`;
                 }),
                 hovertemplate: `%{hovertext}<br>${dateLabel}<extra></extra>`,
               },
@@ -1267,7 +1321,7 @@ export function ModelRaceChart({
             ),
           );
         }
-      }
+      });
       return { data: traces };
     }
 
@@ -1285,7 +1339,7 @@ export function ModelRaceChart({
       };
     });
     return { data: traces };
-  }, [points, topN, mode, bucket, style, pinned]);
+  }, [points, topN, labN, mode, bucket, style, pinned]);
 
   // Ten lines cannot each grow a dotted tail without doubling the legend and
   // the hover stack, so the day in progress gets the shaded band alone — the

@@ -94,7 +94,7 @@ export function RacePanel({
             <div className="chart-note">
               {raceMode === "spend" ? "est. spend" : "tokens"} per {raceBucket} ·{" "}
               {raceBucket === "week" ? "full weeks only" : "one point per day"} ·{" "}
-              {raceStyle === "bar" ? "one bar per lab · top models named, the rest of the top 50 as a pale cap" : "top 10"} ·{" "}
+              {raceStyle === "bar" ? "one bar per lab · product lines stacked inside, the rest of the lab as a pale cap" : "top 10 models"} ·{" "}
               {/* The field is ranked over exactly what's drawn, so the note
                   names the drawn window rather than the fetched one. */}
               {raceClipsToRecent ? `last ${BAR_DAYS} days` : `since ${shortDate(racePoints[0]?.date ?? RACE_SINCE)}`}
