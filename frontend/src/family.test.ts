@@ -20,6 +20,14 @@ describe("familyOf", () => {
     expect(new Set(keys).size).toBe(4);
   });
 
+  it("joins GPT-6 Astra and Astra Pro into one line", () => {
+    expect(key("openai/gpt-6-astra")).toBe("gpt-6-astra");
+    expect(key("openai/gpt-6-astra-pro")).toBe("gpt-6-astra");
+    expect(key("openai/gpt-6-astra-pro:batch")).toBe("gpt-6-astra");
+    // Other GPT lines stay their own rows.
+    expect(key("openai/gpt-5.6-sol")).toBe("openai/gpt-5.6-sol");
+  });
+
   it("joins GLM 5.2 and 5.3, and every Flash cut into its own line", () => {
     expect(key("z-ai/glm-5.2")).toBe("glm-5.2-5.3");
     expect(key("z-ai/glm-5.3")).toBe("glm-5.2-5.3");

@@ -33,6 +33,9 @@ const RULES: { test: RegExp; key: string; label: string }[] = [
   // DeepSeek ships dated re-cuts of the same model — "-0731", "-0813".
   { test: /^deepseek\/deepseek-v4-flash/, key: "deepseek-v4-flash", label: "DeepSeek V4 Flash" },
   { test: /^deepseek\/deepseek-v4-pro/, key: "deepseek-v4-pro", label: "DeepSeek V4 Pro" },
+  // OpenAI's GPT-6 line: Astra and Astra Pro are the same product sold in two
+  // sizes, and the batch cuts of each are the same product again.
+  { test: /^openai\/gpt-6-astra/, key: "gpt-6-astra", label: "GPT-6 Astra" },
   // Qwen 3.8 Max and its refresh.
   { test: /^qwen\/qwen3\.8-max/, key: "qwen3.8-max", label: "Qwen3.8 Max" },
   // Every Google Flash tier — Flash and Flash Lite, all generations.
