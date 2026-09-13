@@ -41,6 +41,16 @@ const TIER_ORDER = ["flagship", "datacenter", "prosumer"];
 const DAILY_MIN_DAYS = 7;
 
 /**
+ * The daily charts show the whole capture, from the first vast.ai sweep on
+ * 2026-08-13 onward, rather than a trailing window: the point of the page is
+ * how rental prices have moved since we started watching, and a 30-day window
+ * had already begun silently dropping the first days. 800 is the server's
+ * ceiling on `days`; the row limit is 16 accelerators × that many days.
+ */
+const ALL_HISTORY_DAYS = 800;
+const ALL_HISTORY_ROWS = 20_000;
+
+/**
  * Trailing window on the sweep tape. A week is the whole history for most
  * accelerators right now (sweeps began 2026-08-13), so this is as far back as
  * the tape can honestly reach — widen it as history accumulates.
@@ -65,7 +75,7 @@ export function ComputeView({ navigate: _navigate }: { navigate: (to: string) =>
 
   useEffect(() => {
     let alive = true;
-    Promise.all([api.gpu(), api.gpuDaily({ days: 30 }), api.market(120)])
+    Promise.all([api.gpu(), api.gpuDaily({ days: ALL_HISTORY_DAYS, limit: ALL_HISTORY_ROWS }), api.market(120)])
       .then(([g, d, m]) => {
         if (!alive) return;
         setAccelerators(g.accelerators);
@@ -269,7 +279,7 @@ export function ComputeView({ navigate: _navigate }: { navigate: (to: string) =>
             <div className="chart-note mono">
               {comparisonHourly
                 ? `hourly · both rebased to 100 at window start · ${comparison.dates.length} shared hours · daily takes over after ${DAILY_MIN_DAYS} days`
-                : `daily close · both rebased to 100 at window start · ${comparison.dates.length} shared days`}
+                : `daily close · both rebased to 100 at capture start · ${comparison.dates.length} shared days since ${comparison.dates[0] ?? "—"}`}
             </div>
           </div>
           <div className="seg seg-sm">
@@ -318,7 +328,7 @@ export function ComputeView({ navigate: _navigate }: { navigate: (to: string) =>
               {bandHourly
                 ? ` · every 15-min sweep (${bandPoints.length}) · daily bands take over after ${DAILY_MIN_DAYS} days of history`
                 : dailySelected.length
-                  ? ` · ${dailySelected.length} days · daily aggregate of all sweeps`
+                  ? ` · ${dailySelected.length} days · whole capture since ${dailySelected[0]!.date} · daily aggregate of all sweeps`
                   : ""}
             </div>
           </div>

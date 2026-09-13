@@ -315,10 +315,13 @@ export const api = {
     q.set("days", String(params.days ?? 30));
     return get<{ series: GpuPriceRow[]; accelerators: Accelerator[] }>(`/gpu/series?${q.toString()}`);
   },
-  gpuDaily: (params: { gpu?: string; days?: number } = {}) => {
+  gpuDaily: (params: { gpu?: string; days?: number; limit?: number } = {}) => {
     const q = new URLSearchParams();
     if (params.gpu) q.set("gpu", params.gpu);
     q.set("days", String(params.days ?? 60));
+    // The server's LIMIT applies after ORDER BY day ASC, so a limit that is too
+    // small drops the newest days, not the oldest — size it for the window.
+    if (params.limit !== undefined) q.set("limit", String(params.limit));
     return get<{ daily: GpuDailyRow[]; accelerators: Accelerator[] }>(`/gpu/daily?${q.toString()}`);
   },
   /** Hourly market snapshots — the token side's intraday series. */
