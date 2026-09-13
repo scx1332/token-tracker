@@ -25,6 +25,8 @@ import {
   buildComparison,
   buildHourlyComparison,
   totalChangePct,
+  priceAxisCeiling,
+  clampToCeiling,
 } from "../gpu";
 
 const TIER_LABEL: Record<string, string> = {
@@ -401,7 +403,14 @@ export function ComputeView({ navigate: _navigate }: { navigate: (to: string) =>
                             {/* Sparkline renders at width:100%, so it needs a sized box
                                 or it would swallow the row and shove the delta off. */}
                             <div style={{ width: 70, flex: "0 0 70px" }}>
-                              <Sparkline values={spark} color={C.indigo} width={70} height={22} />
+                              {/* Same cap as the charts: one junk day must not flatten a
+                                  month of real movement into a single spike. */}
+                              <Sparkline
+                                values={clampToCeiling(spark, priceAxisCeiling(spark).ceiling)}
+                                color={C.indigo}
+                                width={70}
+                                height={22}
+                              />
                             </div>
                             <Delta value={change === null ? null : change / 100} invert />
                           </div>

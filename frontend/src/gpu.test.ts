@@ -7,6 +7,8 @@ import {
   buildComparison,
   buildHourlyComparison,
   totalChangePct,
+  priceAxisCeiling,
+  clampToCeiling,
 } from "./gpu";
 import type { GpuDailyRow, PriceIndexPoint } from "./api";
 
@@ -256,5 +258,50 @@ describe("totalChangePct", () => {
     expect(totalChangePct([5])).toBeNull();
     expect(totalChangePct([])).toBeNull();
     expect(totalChangePct([0, 5])).toBeNull();
+  });
+});
+
+describe("priceAxisCeiling", () => {
+  const flat = Array.from({ length: 40 }, (_, i) => 0.7 + (i % 5) * 0.05);
+
+  test("leaves a well-behaved series on autorange", () => {
+    const r = priceAxisCeiling(flat);
+    expect(r.ceiling).toBeNull();
+    expect(r.clipped).toBe(0);
+    expect(r.peak).toBeCloseTo(0.9);
+  });
+
+  test("caps a series with a few runaway sweeps and counts them", () => {
+    const r = priceAxisCeiling([...flat, 53.34, 26.8, 40.13]);
+    expect(r.ceiling).not.toBeNull();
+    expect(r.ceiling!).toBeLessThan(2);
+    expect(r.ceiling!).toBeGreaterThan(0.9);
+    expect(r.clipped).toBe(3);
+    expect(r.peak).toBeCloseTo(53.34);
+  });
+
+  test("a sustained level shift is inside the top decile and keeps the axis", () => {
+    const shifted = [...Array(20).fill(5), ...Array(20).fill(12)];
+    expect(priceAxisCeiling(shifted).ceiling).toBeNull();
+  });
+
+  test("too few samples for a percentile → autorange, but the peak is still reported", () => {
+    const r = priceAxisCeiling([1, 1, 1, 50]);
+    expect(r.ceiling).toBeNull();
+    expect(r.peak).toBe(50);
+  });
+
+  test("ignores nulls, zeros and non-finite values", () => {
+    const r = priceAxisCeiling([...flat, null, 0, Number.NaN, undefined, 99]);
+    expect(r.clipped).toBe(1);
+    expect(r.peak).toBe(99);
+  });
+});
+
+describe("clampToCeiling", () => {
+  test("clips above the ceiling and passes nulls and a null ceiling through", () => {
+    expect(clampToCeiling([0.5, 3, null, 53], 2)).toEqual([0.5, 2, null, 2]);
+    const values = [0.5, 53, null];
+    expect(clampToCeiling(values, null)).toBe(values);
   });
 });

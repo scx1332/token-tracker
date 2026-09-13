@@ -7,6 +7,7 @@ import type { WeekBucket, WeekDayCell } from "./weekly";
 import { isClosedDay } from "./runningDay";
 import { familyOf } from "./family";
 import { labOf } from "./grouping";
+import { priceAxisCeiling, type AxisCeiling } from "./gpu";
 
 export const Plot = createPlotlyComponent(Plotly);
 
@@ -188,6 +189,42 @@ function runningDayMarks(dates: string[], idx: number): Partial<Layout> {
         text: RUNNING_LABEL,
         showarrow: false,
         font: { family: FONT, size: 9, color: C.muted },
+      },
+    ],
+  };
+}
+
+/**
+ * A y range that a few runaway points are not allowed to own, plus the note
+ * that says so. `priceAxisCeiling` decides whether a cap is needed at all (a
+ * null ceiling leaves autorange alone); this turns its answer into layout: the
+ * axis range and a small top-right annotation naming what got clipped, so the
+ * reader knows the line went off the chart rather than never moving. `floor`
+ * is the bottom of the range — 0 for prices, which are ratios to zero; the
+ * series' own minimum for an index that lives around 100.
+ */
+function cappedAxis(
+  cap: AxisCeiling,
+  floor: number,
+  fmt: (v: number) => string,
+): { yaxis: Partial<Layout["yaxis"]>; annotations: NonNullable<Layout["annotations"]> } {
+  if (cap.ceiling === null || cap.peak === null) return { yaxis: {}, annotations: [] };
+  return {
+    yaxis: { range: [floor, cap.ceiling], autorange: false } as Partial<Layout["yaxis"]>,
+    annotations: [
+      {
+        xref: "paper",
+        yref: "paper",
+        x: 1,
+        y: 1,
+        xanchor: "right",
+        yanchor: "top",
+        xshift: -4,
+        yshift: -2,
+        text: `axis capped at ${fmt(cap.ceiling)} · ${cap.clipped} point${cap.clipped === 1 ? "" : "s"} above, peak ${fmt(cap.peak)}`,
+        showarrow: false,
+        bgcolor: "rgba(255,255,255,0.85)",
+        font: { family: FONT, size: 9.5, color: C.down },
       },
     ],
   };
@@ -718,11 +755,21 @@ export function GpuBandChart({
     return traces;
   }, [points, hasDepth]);
 
+  // One bad evening of parked $53 asks must not set the axis for two weeks
+  // of $0.75 — see priceAxisCeiling. The cap is judged over every plotted
+  // price series together, so the median line cannot be clipped by a p25 cap.
+  const cap = useMemo(
+    () => priceAxisCeiling(points.flatMap((p) => [p.minUsd, p.p25Usd, p.medianUsd])),
+    [points],
+  );
+  const capped = cappedAxis(cap, 0, fmtGpuHr);
+
   const layout = baseLayout({
     height,
     showlegend: true,
     legend: { orientation: "h", x: 0, y: 1.02, yanchor: "bottom", font: { family: FONT, size: 11, color: C.muted } },
     margin: { l: 62, r: hasDepth ? 46 : 18, t: 46, b: 34 },
+    annotations: capped.annotations,
     yaxis: {
       gridcolor: C.grid,
       showgrid: true,
@@ -730,6 +777,7 @@ export function GpuBandChart({
       tickprefix: "$",
       tickfont: { family: FONT, color: C.tick, size: 10 },
       title: { text: "USD / GPU-hour", font: { family: FONT, size: 10, color: C.muted } },
+      ...capped.yaxis,
     },
     ...(hasDepth
       ? {
@@ -809,11 +857,15 @@ export function IntradayTapeChart({
     ];
   }, [rows]);
 
+  const cap = useMemo(() => priceAxisCeiling(rows.flatMap((r) => [r.minUsd, r.medianUsd])), [rows]);
+  const capped = cappedAxis(cap, 0, fmtGpuHr);
+
   const layout = baseLayout({
     height,
     showlegend: true,
     legend: { orientation: "h", x: 0, y: 1.02, yanchor: "bottom", font: { family: FONT, size: 11, color: C.muted } },
     margin: { l: 56, r: 46, t: 46, b: 34 },
+    annotations: capped.annotations,
     yaxis: {
       gridcolor: C.grid,
       showgrid: true,
@@ -821,6 +873,7 @@ export function IntradayTapeChart({
       tickprefix: "$",
       tickfont: { family: FONT, color: C.tick, size: 10 },
       title: { text: "USD / GPU-hour", font: { family: FONT, size: 10, color: C.muted } },
+      ...capped.yaxis,
     },
     // Depth axis: right side, no grid (the $ grid is the reading grid), and a
     // hard floor at zero so the bars sit on the axis instead of floating.
@@ -963,17 +1016,28 @@ export function ComputeVsTokensChart({
     [dates, tokenIndex, gpuIndex, tokenRaw, gpuRaw, gpuLabel],
   );
 
+  // Rebased, so a $53 sweep on a $0.75 base is index 7000: the same cap as the
+  // price charts, over both lines, with the floor at the lines' own low end
+  // (an index lives around 100 — anchoring it at 0 would waste half the plot).
+  const cap = useMemo(() => priceAxisCeiling([...tokenIndex, ...gpuIndex]), [tokenIndex, gpuIndex]);
+  const low = Math.min(
+    ...[...tokenIndex, ...gpuIndex].filter((v): v is number => v !== null && Number.isFinite(v)),
+  );
+  const capped = cappedAxis(cap, Number.isFinite(low) ? low * 0.95 : 0, (v) => v.toFixed(0));
+
   const layout = baseLayout({
     height,
     showlegend: true,
     legend: { orientation: "h", x: 0, y: 1.02, yanchor: "bottom", font: { family: FONT, size: 11, color: C.muted } },
     margin: { l: 52, r: 18, t: 46, b: 34 },
+    annotations: capped.annotations,
     yaxis: {
       gridcolor: C.grid,
       showgrid: true,
       zeroline: false,
       tickfont: { family: FONT, color: C.tick, size: 10 },
       title: { text: "index (start = 100)", font: { family: FONT, size: 10, color: C.muted } },
+      ...capped.yaxis,
     },
     shapes: [
       {
@@ -1475,6 +1539,10 @@ function fmtCompact(v: number): string {
   if (v >= 1e6) return `${(v / 1e6).toFixed(1)}M`;
   if (v >= 1e3) return `${(v / 1e3).toFixed(1)}K`;
   return v.toFixed(0);
+}
+
+function fmtGpuHr(v: number): string {
+  return `$${v.toFixed(v >= 10 ? 1 : 2)}`;
 }
 
 function fmtPrice(v: number): string {

@@ -233,3 +233,57 @@ export function totalChangePct(values: (number | null)[]): number | null {
   if (first === 0) return null;
   return ((last - first) / first) * 100;
 }
+
+/**
+ * A ceiling for a price axis that a few runaway points must not own.
+ *
+ * The vast.ai feed occasionally collapses: for a few hours on 2026-09-11 and
+ * again on 2026-09-12 the RTX books shrank from ~130 machines to two or three,
+ * all of them parked asks at $27–53/GPU-hour. The sweep fence is relative to
+ * the sweep's own median, so when the whole book is junk the junk survives,
+ * and one such evening then sets the y range of every chart for the next two
+ * weeks — an RTX 5090 line that lives at $0.75 flattens into the axis under a
+ * $53 spike.
+ *
+ * Rule: the axis reaches 1.5× the 90th percentile of the plotted values. Any
+ * genuine level shift (B300 drifting from $5 to $12 over weeks) lands inside
+ * the top decile and keeps the axis; a spike that is a small minority of the
+ * window is clipped and reported (`clipped`/`peak`) so the chart can say so.
+ * Returns `ceiling: null` when nothing exceeds it — the caller then leaves the
+ * axis on autorange rather than imposing a range for no reason — and when the
+ * window is too short for a percentile to mean anything.
+ */
+export interface AxisCeiling {
+  /** Top of the axis, or null to leave autorange alone. */
+  ceiling: number | null;
+  /** Plotted values that sit above the ceiling. */
+  clipped: number;
+  /** The largest plotted value. */
+  peak: number | null;
+}
+
+export const CEILING_HEADROOM = 1.5;
+const CEILING_MIN_SAMPLES = 12;
+
+export function priceAxisCeiling(values: (number | null | undefined)[]): AxisCeiling {
+  const usable = values
+    .filter((v): v is number => v !== null && v !== undefined && Number.isFinite(v) && v > 0)
+    .sort((a, b) => a - b);
+  if (usable.length === 0) return { ceiling: null, clipped: 0, peak: null };
+  const peak = usable[usable.length - 1]!;
+  if (usable.length < CEILING_MIN_SAMPLES) return { ceiling: null, clipped: 0, peak };
+
+  const pos = 0.9 * (usable.length - 1);
+  const lo = Math.floor(pos);
+  const hi = Math.ceil(pos);
+  const p90 = lo === hi ? usable[lo]! : usable[lo]! + (usable[hi]! - usable[lo]!) * (pos - lo);
+  const ceiling = p90 * CEILING_HEADROOM;
+  const clipped = usable.filter((v) => v > ceiling).length;
+  return clipped === 0 ? { ceiling: null, clipped: 0, peak } : { ceiling, clipped, peak };
+}
+
+/** Clamp a series to a ceiling — for sparklines, which have no axis to annotate. */
+export function clampToCeiling(values: (number | null)[], ceiling: number | null): (number | null)[] {
+  if (ceiling === null) return values;
+  return values.map((v) => (v === null ? null : Math.min(v, ceiling)));
+}
