@@ -172,7 +172,7 @@ const CLASS_RULES: { test: RegExp; cls: ModelClass }[] = [
   // Chinese labs
   { test: /^z-ai\/glm-.*flash/, cls: "Luna" },
   { test: /^z-ai\/glm/, cls: "Terra" },
-  { test: /^deepseek\/deepseek-v4-flash/, cls: "Luna" },
+  { test: /^deepseek\/deepseek-v4(?:\.1)?-flash/, cls: "Luna" },
   { test: /^deepseek\/deepseek-v4-pro/, cls: "Sol" },
   { test: /^deepseek\//, cls: "Terra" },
   { test: /^moonshotai\/kimi-k3/, cls: "Sol" },

@@ -2,6 +2,7 @@
 // can badge the models the product foregrounds.
 const FRONTIER_PATTERNS = [
   "deepseek/deepseek-v4-flash",
+  "deepseek/deepseek-v4.1-flash",
   "deepseek/deepseek-v4-pro",
   "deepseek/deepseek-v3.2",
   "deepseek/deepseek-chat",
