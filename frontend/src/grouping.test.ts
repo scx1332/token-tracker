@@ -28,6 +28,18 @@ describe("originOf", () => {
 });
 
 describe("classOf", () => {
+  it("keeps Astra and Astra Pro, including variants, in the top tier", () => {
+    for (const id of [
+      "openai/gpt-6-astra",
+      "openai/gpt-6-astra-pro",
+      "openai/gpt-6-astra:batch",
+      "openai/gpt-6-astra-pro:batch",
+      "OPENAI/GPT-6-ASTRA",
+    ]) {
+      expect(classOf(id)).toBe("Top");
+    }
+  });
+
   it("follows the GPT-5.6 tier names", () => {
     expect(classOf("openai/gpt-5.6-luna")).toBe("Luna");
     expect(classOf("openai/gpt-5.6-luna-pro")).toBe("Luna");
@@ -94,6 +106,33 @@ describe("board groupings", () => {
     const cls = groupByFamily(rows, groupingByKey("class"));
     expect(cls.map((g) => g.label)).toEqual(["High · Sol class", "Medium · Terra class"]);
     expect(cls[1]!.parts.map((p) => p.label)).toEqual(["Claude Sonnet", "GLM 5.2 + 5.3"]);
+  });
+
+  it("includes both Astra models in the top-class leaderboard and history", () => {
+    const astraRows = [
+      { modelId: "openai/gpt-6-astra", tokens: 100, spendUsd: 30 },
+      { modelId: "openai/gpt-6-astra-pro", tokens: 20, spendUsd: 10 },
+    ];
+    const grouping = groupingByKey("class");
+    const ranked = groupByFamily(astraRows, grouping);
+    expect(ranked).toHaveLength(1);
+    expect(ranked[0]!.key).toBe("class:Top");
+    expect(ranked[0]!.members).toHaveLength(2);
+    expect(ranked[0]!.parts).toEqual([{ label: "GPT-6 Astra", tokens: 120, spendUsd: 40 }]);
+
+    const points = [{
+      date: "2026-09-17",
+      spendByModel: Object.fromEntries(astraRows.map((r) => [r.modelId, r.spendUsd])),
+      tokensByModel: Object.fromEntries(astraRows.map((r) => [r.modelId, r.tokens])),
+    }];
+    for (const mode of ["spend", "tokens"] as const) {
+      const { series } = familySeries(points, mode, 4, grouping);
+      const total = mode === "spend" ? 40 : 120;
+      expect(series).toHaveLength(1);
+      expect(series[0]!.key).toBe("class:Top");
+      expect(series[0]!.values).toEqual([total]);
+      expect(series[0]!.members).toEqual([{ label: "GPT-6 Astra", values: [total] }]);
+    }
   });
 
   it("the stack unfolds a lab band into product lines", () => {

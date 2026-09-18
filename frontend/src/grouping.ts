@@ -154,6 +154,7 @@ const CLASS_RULES: { test: RegExp; cls: ModelClass }[] = [
   { test: /^anthropic\/claude-sonnet/, cls: "Terra" },
   { test: /^anthropic\/claude-haiku/, cls: "Luna" },
   // OpenAI — the tiers are named after these.
+  { test: /^openai\/gpt-6-astra(?:-pro)?(?:$|[-:])/, cls: "Top" },
   { test: /^openai\/gpt-5\.5-pro/, cls: "Top" },
   { test: /^openai\/gpt-[\d.]+-sol/, cls: "Sol" },
   { test: /^openai\/gpt-[\d.]+-terra/, cls: "Terra" },
