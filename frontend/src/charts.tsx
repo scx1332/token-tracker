@@ -1436,7 +1436,8 @@ export function ModelRaceChart({
       zeroline: false,
       tickformat: ".2s",
       ...(mode === "spend" ? { tickprefix: "$" } : {}),
-      ...(yMax != null ? { range: [0, yMax], autorange: false } : {}),
+      // Quarter-million ticks keep $1.5M labelled just below the spend ceiling.
+      ...(yMax != null ? { range: [0, yMax], autorange: false, dtick: 250_000, tickformat: "~s" } : {}),
       tickfont: { family: FONT, color: C.tick, size: 10 },
     },
     ...marks,
