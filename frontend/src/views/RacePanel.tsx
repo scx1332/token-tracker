@@ -25,10 +25,13 @@ export const RACE_PINS = ["openai/gpt-5.6-luna", "openai/gpt-5.6-terra", "openai
 export function RacePanel({
   includeFree: includeFreeProp,
   height = 380,
+  dailySpendMax,
   allowFullscreen = false,
 }: {
   includeFree?: boolean;
   height?: number;
+  /** Optional ceiling for daily estimated spend; tokens and weeks use their own scale. */
+  dailySpendMax?: number;
   allowFullscreen?: boolean;
 }) {
   // Price × volume is the market-share signal that matters, so spend leads.
@@ -167,6 +170,7 @@ export function RacePanel({
           <ModelRaceChart
             points={racePoints}
             height={chartHeight}
+            yMax={raceMode === "spend" && raceBucket === "day" ? dailySpendMax : undefined}
             topN={raceStyle === "bar" ? 12 : 10}
             mode={raceMode}
             bucket={raceBucket}

@@ -1223,6 +1223,7 @@ export type RaceStyle = "line" | "bar";
 export function ModelRaceChart({
   points,
   height = 300,
+  yMax,
   topN = 10,
   mode = "spend",
   bucket = "week",
@@ -1233,6 +1234,7 @@ export function ModelRaceChart({
 }: {
   points: { date: string; spendByModel: Record<string, number>; tokensByModel: Record<string, number> }[];
   height?: number;
+  yMax?: number;
   topN?: number;
   mode?: RaceMode;
   bucket?: RaceBucket;
@@ -1434,6 +1436,7 @@ export function ModelRaceChart({
       zeroline: false,
       tickformat: ".2s",
       ...(mode === "spend" ? { tickprefix: "$" } : {}),
+      ...(yMax != null ? { range: [0, yMax], autorange: false } : {}),
       tickfont: { family: FONT, color: C.tick, size: 10 },
     },
     ...marks,

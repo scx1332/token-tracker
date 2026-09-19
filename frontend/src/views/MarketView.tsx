@@ -425,7 +425,7 @@ export function MarketView({ navigate }: { navigate: (to: string) => void }) {
       {/* Model race — full width; the panel is shared with the /race tab,
           which adds fullscreen. Free-tier filtering follows the page switch. */}
       <div style={{ marginTop: 16 }}>
-        <RacePanel includeFree={includeFree} height={380} />
+        <RacePanel includeFree={includeFree} height={480} dailySpendMax={1_500_000} />
       </div>
 
       {/* Leaderboards */}
