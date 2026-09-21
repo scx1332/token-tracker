@@ -10,7 +10,7 @@ export function RaceView() {
   return (
     <>
       <SectionHead eyebrow="Head to head" title="The model race" />
-      <RacePanel height={560} allowFullscreen />
+      <RacePanel height={560} dailySpendMax={1_550_000} allowFullscreen />
       <div className="chart-note" style={{ marginTop: 10 }}>
         Est. spend is tokens × observed effective rates — an estimate, not billed revenue. Bars stack each lab's product
         lines — the same rows the Best board's Lab tab sums — into one additive bar (palest cap = the rest of that
