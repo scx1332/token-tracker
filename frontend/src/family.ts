@@ -33,10 +33,13 @@ const RULES: { test: RegExp; key: string; label: string }[] = [
   // DeepSeek Flash includes V4.1 and dated re-cuts; Pro stays separate.
   { test: /^deepseek\/deepseek-v4(?:\.1)?-flash/, key: "deepseek-v4-flash", label: "DeepSeek V4 Flash" },
   { test: /^deepseek\/deepseek-v4-pro/, key: "deepseek-v4-pro", label: "DeepSeek V4 Pro" },
-  // GPT-6: each tier groups its Pro reasoning mode and batch variants.
+  // GPT lines group their Pro reasoning modes and batch variants.
+  // Sol and Luna each span the 5.6 and 6 generations as one product line.
   { test: /^openai\/gpt-6-astra/, key: "gpt-6-astra", label: "GPT-6 Astra" },
-  { test: /^openai\/gpt-6-sol(?:$|[-:])/, key: "gpt-6-sol", label: "GPT-6 Sol" },
-  { test: /^openai\/gpt-6-luna(?:$|[-:])/, key: "gpt-6-luna", label: "GPT-6 Luna" },
+  { test: /^openai\/gpt-(?:5\.6|6)-sol(?:$|[-:])/, key: "gpt-sol", label: "GPT Sol" },
+  { test: /^openai\/gpt-(?:5\.6|6)-luna(?:$|[-:])/, key: "gpt-luna", label: "GPT Luna" },
+  // Current high-tier Grok releases; Fast and older tiers stay separate.
+  { test: /^x-ai\/grok-4\.[567](?:$|:|-[0-9])/, key: "grok", label: "Grok" },
   // UltraSpeed serves the same MiMo checkpoint; Flash is a separate model.
   { test: /^xiaomi\/mimo-v2\.6-pro(?:$|[-:])/, key: "mimo-v2.6-pro", label: "MiMo V2.6 Pro" },
   // Qwen 3.8 Max and its refresh.

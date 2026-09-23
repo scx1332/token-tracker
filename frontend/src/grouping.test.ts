@@ -110,8 +110,8 @@ describe("board groupings", () => {
     expect(lab.map((g) => g.label)).toEqual(["Anthropic", "OpenAI", "Z.ai"]);
     expect(lab[0]!.grouped).toBe(true);
     expect(lab[0]!.parts.map((p) => `${p.label}:${p.spendUsd}`)).toEqual(["Claude Opus:500", "Claude Sonnet:200"]);
-    // A lone model in a lab is named by its display name.
-    expect(lab[1]!.parts[0]!.label).toBe("GPT-5.6 Sol");
+    // A known product line retains its family label.
+    expect(lab[1]!.parts[0]!.label).toBe("GPT Sol");
   });
 
   it("origin sums a whole country", () => {
@@ -159,8 +159,8 @@ describe("board groupings", () => {
     const { series } = familySeries(points, "spend", 5, groupingByKey("lab"));
     expect(series[0]!.label).toBe("Anthropic");
     expect(series[0]!.members.map((m) => m.label)).toEqual(["Claude Opus", "Claude Sonnet"]);
-    // No display names in the race payload: a lone model shows its slug's model half.
-    expect(series[1]!.members.map((m) => m.label)).toEqual(["gpt-5.6-sol"]);
+    // Sol keeps its product-line label inside the lab band.
+    expect(series[1]!.members.map((m) => m.label)).toEqual(["GPT Sol"]);
   });
 
   it("falls back to product lines for an unknown key", () => {

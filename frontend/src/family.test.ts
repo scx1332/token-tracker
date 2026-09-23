@@ -7,7 +7,7 @@ describe("familyOf", () => {
   it("groups new serving variants without merging distinct models", () => {
     for (const tier of ["sol", "luna"]) {
       for (const suffix of ["", ":batch", "-pro", "-pro:batch"]) {
-        expect(key(`openai/gpt-6-${tier}${suffix}`)).toBe(`gpt-6-${tier}`);
+        expect(key(`openai/gpt-6-${tier}${suffix}`)).toBe(`gpt-${tier}`);
       }
     }
     expect(key("anthropic/claude-opus-5.5:batch")).toBe("claude-opus");
@@ -16,6 +16,13 @@ describe("familyOf", () => {
     expect(key("xiaomi/mimo-v2.6-flash")).toBe("xiaomi/mimo-v2.6-flash");
     expect(key("qwen/qwen3.8-omni-flash")).toBe("qwen/qwen3.8-omni-flash");
     expect(key("z-ai/glm-5.3-flashx")).toBe("glm-flash");
+  });
+
+  it("keeps other Grok product lines outside the flagship family", () => {
+    for (const id of ["x-ai/grok-4-fast", "x-ai/grok-4.7-fast", "x-ai/grok-build-0.1", "x-ai/grok-4.3"]) {
+      expect(key(id)).toBe(id);
+    }
+    expect(key("x-ai/grok-4.7:batch")).toBe("grok");
   });
 
   it("folds every version of one Anthropic line together", () => {
@@ -39,7 +46,7 @@ describe("familyOf", () => {
     expect(key("openai/gpt-6-astra-pro")).toBe("gpt-6-astra");
     expect(key("openai/gpt-6-astra-pro:batch")).toBe("gpt-6-astra");
     // Other GPT lines stay their own rows.
-    expect(key("openai/gpt-5.6-sol")).toBe("openai/gpt-5.6-sol");
+    expect(key("openai/gpt-5.6-sol")).toBe("gpt-sol");
   });
 
   it("joins GLM 5.2 and 5.3, and every Flash cut into its own line", () => {
@@ -75,13 +82,43 @@ describe("familyOf", () => {
   });
 
   it("leaves models sold side by side alone", () => {
-    expect(key("openai/gpt-5.6-sol")).toBe("openai/gpt-5.6-sol");
-    expect(key("openai/gpt-5.6-luna")).toBe("openai/gpt-5.6-luna");
-    expect(familyOf("openai/gpt-5.6-sol", "OpenAI: GPT-5.6 Sol").label).toBe("OpenAI: GPT-5.6 Sol");
+    expect(key("openai/gpt-5.6-sol")).toBe("gpt-sol");
+    expect(key("openai/gpt-5.6-luna")).toBe("gpt-luna");
+    expect(familyOf("openai/gpt-5.6-sol", "OpenAI: GPT-5.6 Sol").label).toBe("GPT Sol");
   });
 });
 
 describe("groupByFamily", () => {
+  for (const [family, label, ids] of [
+    ...["sol", "luna"].map((tier) => [
+      `gpt-${tier}`, tier === "sol" ? "GPT Sol" : "GPT Luna",
+      ["5.6", "6"].flatMap((version) =>
+        ["", "-pro", ":batch", "-pro:batch"].map((suffix) => `openai/gpt-${version}-${tier}${suffix}`),
+      ),
+    ] as const),
+    ["grok", "Grok", ["x-ai/grok-4.5", "x-ai/grok-4.6", "x-ai/grok-4.7"]] as const,
+  ]) {
+    it(`combines ${label} generations in board totals and historical stacks`, () => {
+      const rows = ids.map((modelId) => ({ modelId, tokens: 100, spendUsd: 10 }));
+      const grouped = groupByFamily(rows);
+      expect(grouped).toHaveLength(1);
+      expect(grouped[0]!.label).toBe(label);
+      expect(grouped[0]!.tokens).toBe(ids.length * 100);
+      expect(grouped[0]!.spendUsd).toBe(ids.length * 10);
+      expect(grouped[0]!.members).toHaveLength(ids.length);
+      for (const mode of ["spend", "tokens"] as const) {
+        const { series } = familySeries([{
+          date: "2026-09-22",
+          spendByModel: Object.fromEntries(ids.map((id) => [id, 10])),
+          tokensByModel: Object.fromEntries(ids.map((id) => [id, 100])),
+        }], mode, 10);
+        expect(series).toHaveLength(1);
+        expect(series[0]!.key).toBe(family);
+        expect(series[0]!.values).toEqual([ids.length * (mode === "spend" ? 10 : 100)]);
+      }
+    });
+  }
+
   const rows = [
     { modelId: "anthropic/claude-opus-5", name: "Claude Opus 5", tokens: 10, spendUsd: 400 },
     { modelId: "anthropic/claude-opus-4.8", name: "Claude Opus 4.8", tokens: 5, spendUsd: 130 },
@@ -92,7 +129,7 @@ describe("groupByFamily", () => {
 
   it("sums a family's spend and tokens and ranks by the total", () => {
     const grouped = groupByFamily(rows);
-    expect(grouped.map((g) => g.key)).toEqual(["claude-opus", "openai/gpt-5.6-sol", "deepseek-v4-flash"]);
+    expect(grouped.map((g) => g.key)).toEqual(["claude-opus", "gpt-sol", "deepseek-v4-flash"]);
     expect(grouped[0]!.spendUsd).toBe(530);
     expect(grouped[0]!.tokens).toBe(15);
     expect(grouped[0]!.label).toBe("Claude Opus");
@@ -106,8 +143,8 @@ describe("groupByFamily", () => {
     ]);
   });
 
-  it("labels a lone model with its own name, not its slug", () => {
-    expect(groupByFamily(rows)[1]!.label).toBe("GPT-5.6 Sol");
+  it("keeps the product-line label when only one version has usage", () => {
+    expect(groupByFamily(rows)[1]!.label).toBe("GPT Sol");
   });
 
   it("treats missing values as zero", () => {
@@ -131,7 +168,7 @@ describe("familySeries", () => {
   it("stacks families over time and folds the tail into Others", () => {
     const { dates, series } = familySeries(points, "spend", 2);
     expect(dates).toEqual(["2026-08-03", "2026-08-10"]);
-    expect(series.map((s) => s.key)).toEqual(["claude-opus", "openai/gpt-5.6-sol", "__others"]);
+    expect(series.map((s) => s.key)).toEqual(["claude-opus", "gpt-sol", "__others"]);
     expect(series[0]!.values).toEqual([150, 200]);
     expect(series[1]!.values).toEqual([90, 80]);
     expect(series[2]!.values).toEqual([10, 5]);
@@ -153,7 +190,7 @@ describe("familySeries", () => {
 
   it("shortens a slug label to the model half", () => {
     const { series } = familySeries(points, "spend", 3);
-    expect(series.map((s) => s.label)).toEqual(["Claude Opus", "gpt-5.6-sol", "grok-4.6"]);
+    expect(series.map((s) => s.label)).toEqual(["Claude Opus", "GPT Sol", "Grok"]);
   });
 });
 
