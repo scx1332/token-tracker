@@ -16,6 +16,8 @@ export const FRONTIER_PATTERNS: string[] = [
   "z-ai/glm-4.7",
   "openai/gpt-5.6-luna",
   "openai/gpt-5",
+  "openai/gpt-6",
+  "anthropic/claude-fable",
   "anthropic/claude-opus-5",
   "anthropic/claude-sonnet-5",
   "google/gemini-3",

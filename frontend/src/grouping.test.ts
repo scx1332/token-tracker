@@ -28,6 +28,23 @@ describe("originOf", () => {
 });
 
 describe("classOf", () => {
+  it("places September launches and their serving variants in the existing tiers", () => {
+    for (const suffix of ["", ":batch", "-pro", "-pro:batch"]) {
+      expect(classOf(`openai/gpt-6-sol${suffix}`)).toBe("Sol");
+      expect(classOf(`openai/gpt-6-luna${suffix}`)).toBe("Luna");
+    }
+    expect(classOf("anthropic/claude-opus-5.5:batch")).toBe("Sol");
+    expect(classOf("x-ai/grok-4.7")).toBe("Sol");
+    expect(classOf("x-ai/grok-4-fast")).toBe("Terra");
+    expect(classOf("qwen/qwen3.8-omni-flash")).toBe("Luna");
+    expect(classOf("xiaomi/mimo-v2.6-pro-ultraspeed")).toBe("Terra");
+    expect(classOf("xiaomi/mimo-v2.6-flash")).toBe("Luna");
+    expect(classOf("z-ai/glm-5.3-flashx")).toBe("Luna");
+    expect(classOf("upstage/solar-mini4")).toBe("Luna");
+    expect(classOf("aion-labs/aion-3.5-mini")).toBe("Luna");
+    expect(classOf("aion-labs/aion-3.5")).toBe("Terra");
+  });
+
   it("keeps Astra and Astra Pro, including variants, in the top tier", () => {
     for (const id of [
       "openai/gpt-6-astra",

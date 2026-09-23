@@ -168,7 +168,7 @@ const CLASS_RULES: { test: RegExp; cls: ModelClass }[] = [
   { test: /^google\/gemini-.*pro/, cls: "Sol" },
   { test: /^google\/gemma/, cls: "Luna" },
   // xAI
-  { test: /^x-ai\/grok-4\.[56]/, cls: "Sol" },
+  { test: /^x-ai\/grok-4\.[567](?:$|[-:])/, cls: "Sol" },
   { test: /^x-ai\/grok/, cls: "Terra" },
   // Chinese labs
   { test: /^z-ai\/glm-.*flash/, cls: "Luna" },
@@ -179,7 +179,7 @@ const CLASS_RULES: { test: RegExp; cls: ModelClass }[] = [
   { test: /^moonshotai\/kimi-k3/, cls: "Sol" },
   { test: /^moonshotai\//, cls: "Terra" },
   { test: /^qwen\/qwen[\d.]+-(max|2\.4t)/, cls: "Sol" },
-  { test: /^qwen\/qwen[\d.]+-flash/, cls: "Luna" },
+  { test: /^qwen\/qwen[\d.]+-(?:omni-)?flash/, cls: "Luna" },
   { test: /^qwen\//, cls: "Terra" },
   { test: /^tencent\/hy4/, cls: "Terra" },
   { test: /^tencent\//, cls: "Luna" },

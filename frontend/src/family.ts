@@ -33,9 +33,12 @@ const RULES: { test: RegExp; key: string; label: string }[] = [
   // DeepSeek Flash includes V4.1 and dated re-cuts; Pro stays separate.
   { test: /^deepseek\/deepseek-v4(?:\.1)?-flash/, key: "deepseek-v4-flash", label: "DeepSeek V4 Flash" },
   { test: /^deepseek\/deepseek-v4-pro/, key: "deepseek-v4-pro", label: "DeepSeek V4 Pro" },
-  // OpenAI's GPT-6 line: Astra and Astra Pro are the same product sold in two
-  // sizes, and the batch cuts of each are the same product again.
+  // GPT-6: each tier groups its Pro reasoning mode and batch variants.
   { test: /^openai\/gpt-6-astra/, key: "gpt-6-astra", label: "GPT-6 Astra" },
+  { test: /^openai\/gpt-6-sol(?:$|[-:])/, key: "gpt-6-sol", label: "GPT-6 Sol" },
+  { test: /^openai\/gpt-6-luna(?:$|[-:])/, key: "gpt-6-luna", label: "GPT-6 Luna" },
+  // UltraSpeed serves the same MiMo checkpoint; Flash is a separate model.
+  { test: /^xiaomi\/mimo-v2\.6-pro(?:$|[-:])/, key: "mimo-v2.6-pro", label: "MiMo V2.6 Pro" },
   // Qwen 3.8 Max and its refresh.
   { test: /^qwen\/qwen3\.8-max/, key: "qwen3.8-max", label: "Qwen3.8 Max" },
   // Every Google Flash tier — Flash and Flash Lite, all generations.

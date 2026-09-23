@@ -4,6 +4,20 @@ import { breakdownAt, familyOf, familySeries, groupByFamily } from "./family";
 const key = (id: string) => familyOf(id).key;
 
 describe("familyOf", () => {
+  it("groups new serving variants without merging distinct models", () => {
+    for (const tier of ["sol", "luna"]) {
+      for (const suffix of ["", ":batch", "-pro", "-pro:batch"]) {
+        expect(key(`openai/gpt-6-${tier}${suffix}`)).toBe(`gpt-6-${tier}`);
+      }
+    }
+    expect(key("anthropic/claude-opus-5.5:batch")).toBe("claude-opus");
+    expect(key("xiaomi/mimo-v2.6-pro")).toBe("mimo-v2.6-pro");
+    expect(key("xiaomi/mimo-v2.6-pro-ultraspeed")).toBe("mimo-v2.6-pro");
+    expect(key("xiaomi/mimo-v2.6-flash")).toBe("xiaomi/mimo-v2.6-flash");
+    expect(key("qwen/qwen3.8-omni-flash")).toBe("qwen/qwen3.8-omni-flash");
+    expect(key("z-ai/glm-5.3-flashx")).toBe("glm-flash");
+  });
+
   it("folds every version of one Anthropic line together", () => {
     expect(key("anthropic/claude-opus-5")).toBe("claude-opus");
     expect(key("anthropic/claude-opus-4.8")).toBe("claude-opus");
