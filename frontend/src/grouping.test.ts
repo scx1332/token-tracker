@@ -122,7 +122,7 @@ describe("board groupings", () => {
   it("class buckets by tier and keeps the tier order stable in its keys", () => {
     const cls = groupByFamily(rows, groupingByKey("class"));
     expect(cls.map((g) => g.label)).toEqual(["High · Sol class", "Medium · Terra class"]);
-    expect(cls[1]!.parts.map((p) => p.label)).toEqual(["Claude Sonnet", "GLM 5.2 + 5.3"]);
+    expect(cls[1]!.parts.map((p) => p.label)).toEqual(["Claude Sonnet", "GLM 5"]);
   });
 
   it("includes both Astra models in the top-class leaderboard and history", () => {
@@ -135,7 +135,7 @@ describe("board groupings", () => {
     expect(ranked).toHaveLength(1);
     expect(ranked[0]!.key).toBe("class:Top");
     expect(ranked[0]!.members).toHaveLength(2);
-    expect(ranked[0]!.parts).toEqual([{ label: "GPT-6 Astra", tokens: 120, spendUsd: 40 }]);
+    expect(ranked[0]!.parts).toEqual([{ label: "GPT Astra", tokens: 120, spendUsd: 40 }]);
 
     const points = [{
       date: "2026-09-17",
@@ -148,7 +148,7 @@ describe("board groupings", () => {
       expect(series).toHaveLength(1);
       expect(series[0]!.key).toBe("class:Top");
       expect(series[0]!.values).toEqual([total]);
-      expect(series[0]!.members).toEqual([{ label: "GPT-6 Astra", values: [total] }]);
+      expect(series[0]!.members).toEqual([{ label: "GPT Astra", values: [total] }]);
     }
   });
 

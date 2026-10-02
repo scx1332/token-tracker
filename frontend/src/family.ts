@@ -26,20 +26,24 @@ const RULES: { test: RegExp; key: string; label: string }[] = [
   { test: /^anthropic\/claude-fable/, key: "claude-fable", label: "Claude Fable" },
   { test: /^anthropic\/claude-haiku/, key: "claude-haiku", label: "Claude Haiku" },
   // Z.ai: every Flash cut is one product line (this rule runs first, so the
-  // GLM 5 rule below never claims one); the chat models of the current
-  // generation, 5.2 + 5.3, are the other.
+  // GLM 5 rule below never claims one); the chat models of the 5.x generation
+  // from 5.2 on (5.2, 5.3, 5.3 Prime and whatever point release ships next)
+  // are the other; 5.1 and earlier stay their own rows.
   { test: /^z-ai\/glm-.*flash/, key: "glm-flash", label: "GLM Flash" },
-  { test: /^z-ai\/glm-5\.[23]/, key: "glm-5.2-5.3", label: "GLM 5.2 + 5.3" },
-  // DeepSeek Flash includes V4.1 and dated re-cuts; Pro stays separate.
-  { test: /^deepseek\/deepseek-v4(?:\.1)?-flash/, key: "deepseek-v4-flash", label: "DeepSeek V4 Flash" },
-  { test: /^deepseek\/deepseek-v4-pro/, key: "deepseek-v4-pro", label: "DeepSeek V4 Pro" },
-  // GPT lines group their Pro reasoning modes and batch variants.
-  // Sol and Luna each span the 5.6 and 6 generations as one product line.
-  { test: /^openai\/gpt-6-astra/, key: "gpt-6-astra", label: "GPT-6 Astra" },
-  { test: /^openai\/gpt-(?:5\.6|6)-sol(?:$|[-:])/, key: "gpt-sol", label: "GPT Sol" },
-  { test: /^openai\/gpt-(?:5\.6|6)-luna(?:$|[-:])/, key: "gpt-luna", label: "GPT Luna" },
-  // Current high-tier Grok releases; Fast and older tiers stay separate.
-  { test: /^x-ai\/grok-4\.[567](?:$|:|-[0-9])/, key: "grok", label: "Grok" },
+  { test: /^z-ai\/glm-5\.(?:[2-9]|\d{2,})(?:$|[-:])/, key: "glm-5", label: "GLM 5" },
+  // DeepSeek Flash spans V4, V4.1 and dated re-cuts; Pro is its own line.
+  { test: /^deepseek\/deepseek-v4(?:\.\d+)?-flash/, key: "deepseek-v4-flash", label: "DeepSeek V4 Flash" },
+  { test: /^deepseek\/deepseek-v4(?:\.\d+)?-pro/, key: "deepseek-v4-pro", label: "DeepSeek V4 Pro" },
+  // GPT tiers are product lines that outlive a generation: Sol is sold as
+  // 5.6, 6 and 6.1, and the next point release joins the same row without a
+  // code change. Each tier folds its Pro reasoning mode and batch variants.
+  { test: /^openai\/gpt-[\d.]+-astra(?:$|[-:])/, key: "gpt-astra", label: "GPT Astra" },
+  { test: /^openai\/gpt-[\d.]+-sol(?:$|[-:])/, key: "gpt-sol", label: "GPT Sol" },
+  { test: /^openai\/gpt-[\d.]+-terra(?:$|[-:])/, key: "gpt-terra", label: "GPT Terra" },
+  { test: /^openai\/gpt-[\d.]+-luna(?:$|[-:])/, key: "gpt-luna", label: "GPT Luna" },
+  // Flagship Grok releases from 4.5 on (and a future Grok 5); Fast, Build and
+  // older tiers stay separate.
+  { test: /^x-ai\/grok-(?:4\.[5-9]|[5-9](?:\.\d+)?)(?:$|:|-[0-9])/, key: "grok", label: "Grok" },
   // UltraSpeed serves the same MiMo checkpoint; Flash is a separate model.
   { test: /^xiaomi\/mimo-v2\.6-pro(?:$|[-:])/, key: "mimo-v2.6-pro", label: "MiMo V2.6 Pro" },
   // Qwen 3.8 Max and its refresh.

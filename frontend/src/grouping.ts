@@ -154,7 +154,7 @@ const CLASS_RULES: { test: RegExp; cls: ModelClass }[] = [
   { test: /^anthropic\/claude-sonnet/, cls: "Terra" },
   { test: /^anthropic\/claude-haiku/, cls: "Luna" },
   // OpenAI — the tiers are named after these.
-  { test: /^openai\/gpt-6-astra(?:-pro)?(?:$|[-:])/, cls: "Top" },
+  { test: /^openai\/gpt-[\d.]+-astra(?:-pro)?(?:$|[-:])/, cls: "Top" },
   { test: /^openai\/gpt-5\.5-pro/, cls: "Top" },
   { test: /^openai\/gpt-[\d.]+-sol/, cls: "Sol" },
   { test: /^openai\/gpt-[\d.]+-terra/, cls: "Terra" },
@@ -168,13 +168,13 @@ const CLASS_RULES: { test: RegExp; cls: ModelClass }[] = [
   { test: /^google\/gemini-.*pro/, cls: "Sol" },
   { test: /^google\/gemma/, cls: "Luna" },
   // xAI
-  { test: /^x-ai\/grok-4\.[567](?:$|[-:])/, cls: "Sol" },
+  { test: /^x-ai\/grok-(?:4\.[5-9]|[5-9](?:\.\d+)?)(?:$|[-:])/, cls: "Sol" },
   { test: /^x-ai\/grok/, cls: "Terra" },
   // Chinese labs
   { test: /^z-ai\/glm-.*flash/, cls: "Luna" },
   { test: /^z-ai\/glm/, cls: "Terra" },
-  { test: /^deepseek\/deepseek-v4(?:\.1)?-flash/, cls: "Luna" },
-  { test: /^deepseek\/deepseek-v4-pro/, cls: "Sol" },
+  { test: /^deepseek\/deepseek-v4(?:\.\d+)?-flash/, cls: "Luna" },
+  { test: /^deepseek\/deepseek-v4(?:\.\d+)?-pro/, cls: "Sol" },
   { test: /^deepseek\//, cls: "Terra" },
   { test: /^moonshotai\/kimi-k3/, cls: "Sol" },
   { test: /^moonshotai\//, cls: "Terra" },

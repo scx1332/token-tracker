@@ -41,17 +41,33 @@ describe("familyOf", () => {
     expect(new Set(keys).size).toBe(4);
   });
 
+  it("folds every generation of a GPT tier into one line", () => {
+    for (const [tier, suffix] of [["sol", ""], ["sol", "-pro"], ["sol", "-pro:batch"], ["terra", ""], ["luna", ":batch"], ["astra", "-pro"]]) {
+      for (const version of ["5.6", "6", "6.1", "6.2", "7"]) {
+        expect(key(`openai/gpt-${version}-${tier}${suffix}`)).toBe(`gpt-${tier}`);
+      }
+    }
+    // The dated "latest" aliases carry no usage and are not OpenAI slugs.
+    expect(key("~openai/gpt-sol-latest")).toBe("~openai/gpt-sol-latest");
+    // Other GPT lines stay their own rows.
+    expect(key("openai/gpt-5.5")).toBe("openai/gpt-5.5");
+    expect(key("openai/gpt-5.3-codex")).toBe("openai/gpt-5.3-codex");
+  });
+
   it("joins GPT-6 Astra and Astra Pro into one line", () => {
-    expect(key("openai/gpt-6-astra")).toBe("gpt-6-astra");
-    expect(key("openai/gpt-6-astra-pro")).toBe("gpt-6-astra");
-    expect(key("openai/gpt-6-astra-pro:batch")).toBe("gpt-6-astra");
+    expect(key("openai/gpt-6-astra")).toBe("gpt-astra");
+    expect(key("openai/gpt-6-astra-pro")).toBe("gpt-astra");
+    expect(key("openai/gpt-6-astra-pro:batch")).toBe("gpt-astra");
     // Other GPT lines stay their own rows.
     expect(key("openai/gpt-5.6-sol")).toBe("gpt-sol");
   });
 
   it("joins GLM 5.2 and 5.3, and every Flash cut into its own line", () => {
-    expect(key("z-ai/glm-5.2")).toBe("glm-5.2-5.3");
-    expect(key("z-ai/glm-5.3")).toBe("glm-5.2-5.3");
+    expect(key("z-ai/glm-5.2")).toBe("glm-5");
+    expect(key("z-ai/glm-5.3")).toBe("glm-5");
+    expect(key("z-ai/glm-5.3-prime")).toBe("glm-5");
+    expect(key("z-ai/glm-5.4")).toBe("glm-5");
+    expect(key("z-ai/glm-4.7")).toBe("z-ai/glm-4.7");
     expect(key("z-ai/glm-5.3-flash")).toBe("glm-flash");
     expect(key("z-ai/glm-5.2-flash")).toBe("glm-flash");
     expect(key("z-ai/glm-4.7-flash")).toBe("glm-flash");
@@ -96,7 +112,7 @@ describe("groupByFamily", () => {
         ["", "-pro", ":batch", "-pro:batch"].map((suffix) => `openai/gpt-${version}-${tier}${suffix}`),
       ),
     ] as const),
-    ["grok", "Grok", ["x-ai/grok-4.5", "x-ai/grok-4.6", "x-ai/grok-4.7"]] as const,
+    ["grok", "Grok", ["x-ai/grok-4.5", "x-ai/grok-4.6", "x-ai/grok-4.7", "x-ai/grok-4.8", "x-ai/grok-5"]] as const,
   ]) {
     it(`combines ${label} generations in board totals and historical stacks`, () => {
       const rows = ids.map((modelId) => ({ modelId, tokens: 100, spendUsd: 10 }));
@@ -180,7 +196,7 @@ describe("familySeries", () => {
       "spend",
       5,
     );
-    expect(series.find((s) => s.key === "glm-5.2-5.3")!.values).toEqual([5, 0]);
+    expect(series.find((s) => s.key === "glm-5")!.values).toEqual([5, 0]);
   });
 
   it("reads tokens when asked for tokens", () => {
@@ -235,7 +251,7 @@ describe("breakdownAt", () => {
   });
 
   it("unfolds a product line holding a single model, so it reads like the rest", () => {
-    const glm = familySeries(points, "spend", 5).series.find((s) => s.key === "glm-5.2-5.3")!;
+    const glm = familySeries(points, "spend", 5).series.find((s) => s.key === "glm-5")!;
     expect(glm.grouped).toBe(true);
     expect(breakdownAt(glm, 0, fmt)).toEqual(["glm-5.2 $5 · 100%"]);
   });
