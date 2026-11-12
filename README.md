@@ -157,8 +157,8 @@ bun run typecheck
 `docker compose up -d --build` (or `./deploy.sh`, which stamps `BUILD_COMMIT` /
 `BUILD_DATE`). Secrets live in `.env` (see `.env.example`). The host nginx site
 proxies `token-tracker.arkiv-global.net` → `127.0.0.1:28471` (frontend) and
-`/api` → `127.0.0.1:28470` (backend); `gitploy.py` re‑runs `deploy.sh` on new
-commits.
+`/api` → `127.0.0.1:28470` (backend). Deploys are manual: review the commit,
+then run `./deploy.sh` on the host.
 
 ### Backups
 

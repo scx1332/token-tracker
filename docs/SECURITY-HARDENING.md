@@ -196,10 +196,9 @@ Two gaps, now closed:
    03:30 daily. Suggested root crontab line:
    `30 3 * * * /home/ubuntu/scx1332/token-tracker/scripts/backup-db.sh >/dev/null 2>&1`.
    Consider `umask 027` in the script, and an encrypted off-host copy.
-5. **Continuous deploy.** Don't run `gitploy.py` here as-is. It runs
-   `git pull` plus `./deploy.sh` every 60 s, so anyone who can push to `main`
-   gets code execution as a Docker-capable (root-equivalent) user. Prefer
-   deploying a reviewed, ideally signed, tag by hand.
+5. **Continuous deploy.** `gitploy.py` (`git pull` + `./deploy.sh` every 60 s,
+   giving anyone who can push to `main` code execution on the host) has been
+   removed. Deploy a reviewed, ideally signed, tag by hand with `./deploy.sh`.
 6. **CI supply chain.**
    - Pin `actions/checkout`, `oven-sh/setup-bun` and the rest to commit SHAs.
    - `production-check.yml` uses `bun-version: latest`; pin it.
