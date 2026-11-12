@@ -199,17 +199,17 @@ Two gaps, now closed:
 5. **Continuous deploy.** `gitploy.py` (`git pull` + `./deploy.sh` every 60 s,
    giving anyone who can push to `main` code execution on the host) has been
    removed. Deploy a reviewed, ideally signed, tag by hand with `./deploy.sh`.
-6. **CI supply chain.**
-   - Pin `actions/checkout`, `oven-sh/setup-bun` and the rest to commit SHAs.
-   - `production-check.yml` uses `bun-version: latest`; pin it.
-   - Confirm the GHCR `token-tracker-backup` package is private.
-7. **Frontend dependencies.** `npm audit` reports:
-   - 2 critical: maplibre-gl XSS via `plotly.js`. Low practical risk: the app
-     bundles `plotly.js-dist-min` and draws no map traces;
-   - 3 high and 1 moderate in build/dev tooling (vite, esbuild, source-map-js,
-     probe-image-size).
-
-   Plan a vite and plotly upgrade. `bun audit` on the backend: clean.
+6. **CI supply chain (done).** `actions/checkout` (v7.0.1) and
+   `oven-sh/setup-bun` (v2.2.0) are pinned to commit SHAs, and
+   `production-check.yml` pins `bun-version: 1.3.13` to match `BUN_IMAGE`.
+   - Confirm the GHCR `token-tracker-backup` package is private (it is, per
+     the owner).
+7. **Frontend dependencies.** `npm audit fix` cleared the critical
+   maplibre-gl/plotly.js issues and the high probe-image-size and
+   source-map-js ones. `bun audit` on the backend is clean. Two findings
+   remain, both affecting only the vite dev server, never the production
+   bundle: vite <=6.4.3 (high) and its esbuild <=0.24.2 (moderate). Fixing
+   them needs vite 5 -> 8, a major upgrade to plan separately.
 8. **Smaller items.**
    - The API echoes internal error messages (`Internal error: …`).
    - `/market/race?top=` has no upper bound.

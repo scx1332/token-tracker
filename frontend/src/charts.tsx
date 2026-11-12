@@ -185,7 +185,7 @@ function runningDayMarks(dates: string[], idx: number): Partial<Layout> {
         yref: "paper",
         xanchor: "center",
         yanchor: "middle",
-        textangle: "-90",
+        textangle: -90,
         text: RUNNING_LABEL,
         showarrow: false,
         font: { family: FONT, size: 9, color: C.muted },
