@@ -1,13 +1,46 @@
+# Hardened stack — every choice below is explained in docs/SECURITY-HARDENING.md.
+#
+# Required in .env (compose refuses to start without them; there are no
+# built-in fallback credentials): POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB.
+# POSTGRES_PASSWORD is embedded in DATABASE_URL, so keep it URL-safe (hex).
+
+x-hardening: &hardening
+  restart: unless-stopped
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "5"
+
+x-app-build-args: &app-build-args
+  BUILD_COMMIT: ${BUILD_COMMIT:-unknown}
+  BUILD_DATE: ${BUILD_DATE:-unknown}
+
+x-database-url: &database-url "postgres://${POSTGRES_USER:?set POSTGRES_USER in .env}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:?set POSTGRES_DB in .env}"
+
 services:
   postgres:
-    image: postgres:16-alpine
-    restart: unless-stopped
+    <<: *hardening
+    image: postgres:16.15-alpine@sha256:aa6cb33cf4c19c765cefcf48d96176258800870a9a1e930ad126200f9d825139
+    # The image's own `postgres` user. Running as it from the start (instead of
+    # root + gosu) needs no capabilities at all; the data volume is already 70-owned.
+    user: "70:70"
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-tokens}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-tokens}
-      POSTGRES_DB: ${POSTGRES_DB:-tokens}
+      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:?set POSTGRES_DB in .env}
     volumes:
       - pgdata:/var/lib/postgresql/data
+    tmpfs:
+      - /var/run/postgresql:size=1m,uid=70,gid=70,mode=0775
+      - /tmp:size=64m,uid=70,gid=70,mode=1777
+    networks: [db]
+    deploy:
+      resources:
+        limits: { cpus: "2", memory: 2g, pids: 256 }
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
@@ -15,18 +48,16 @@ services:
       retries: 20
 
   ingest:
+    <<: *hardening
     build:
       context: .
       dockerfile: Dockerfile
-      args:
-        BUILD_COMMIT: ${BUILD_COMMIT:-unknown}
-        BUILD_DATE: ${BUILD_DATE:-unknown}
-    restart: unless-stopped
+      args: *app-build-args
     depends_on:
       postgres:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgres://${POSTGRES_USER:-tokens}:${POSTGRES_PASSWORD:-tokens}@postgres:5432/${POSTGRES_DB:-tokens}
+      DATABASE_URL: *database-url
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
       OPENROUTER_BASE_URL: ${OPENROUTER_BASE_URL:-https://openrouter.ai}
       INGEST_INTERVAL_MS: ${INGEST_INTERVAL_MS:-3600000}
@@ -39,50 +70,86 @@ services:
       VASTAI_BASE_URL: ${VASTAI_BASE_URL:-https://console.vast.ai}
       VASTAI_API_KEY: ${VASTAI_API_KEY:-}
       BACKFILL_DAYS: ${BACKFILL_DAYS:-120}
+    tmpfs:
+      - /tmp:size=64m,uid=10001,gid=10001,mode=0700
+    # db: postgres. egress: OpenRouter + vast.ai. Never shares a network with
+    # the frontend, and it is the only service holding the OpenRouter key.
+    networks: [db, egress]
+    deploy:
+      resources:
+        limits: { cpus: "1", memory: 1g, pids: 128 }
     command: ["bun", "run", "ingest"]
 
   backend:
+    <<: *hardening
     build:
       context: .
       dockerfile: Dockerfile
-      args:
-        BUILD_COMMIT: ${BUILD_COMMIT:-unknown}
-        BUILD_DATE: ${BUILD_DATE:-unknown}
-    restart: unless-stopped
+      args: *app-build-args
     depends_on:
       postgres:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgres://${POSTGRES_USER:-tokens}:${POSTGRES_PASSWORD:-tokens}@postgres:5432/${POSTGRES_DB:-tokens}
+      DATABASE_URL: *database-url
       SERVER_PORT: 3000
       SERVER_HOSTNAME: 0.0.0.0
-      # /backup/latest stays 404 unless a token is set (see .env.example).
+      # /backup/latest stays 404 unless a token is set — and also when the token
+      # is shorter than 32 chars or is the .env.example placeholder.
       BACKUP_DIR: /backups
       BACKUP_TOKEN: ${BACKUP_TOKEN:-}
     volumes:
       - ${BACKUP_DIR_HOST:-/home/ubuntu/backups/token-tracker}:/backups:ro
+    tmpfs:
+      - /tmp:size=64m,uid=10001,gid=10001,mode=0700
+    # db: postgres. egress: the provider-volume proxy + the published port.
+    # web: reachable by the frontend.
+    networks: [db, egress, web]
     ports:
       - "127.0.0.1:${BACKEND_PORT:-28470}:3000"
+    deploy:
+      resources:
+        limits: { cpus: "2", memory: 1g, pids: 128 }
     command: ["bun", "run", "serve"]
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/health || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/health >/dev/null || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 6
 
   frontend:
+    <<: *hardening
     build:
       context: ./frontend
       dockerfile: Dockerfile
-    restart: unless-stopped
     depends_on:
       - backend
     environment:
       PORT: 23561
       BACKEND_HOST: backend
       BACKEND_PORT: 3000
+    tmpfs:
+      - /tmp:size=16m,uid=10001,gid=10001,mode=0700
+    # web only: the frontend can reach the backend and nothing behind it.
+    networks: [web]
     ports:
       - "127.0.0.1:${FRONTEND_PORT:-28471}:23561"
+    deploy:
+      resources:
+        limits: { cpus: "1", memory: 256m, pids: 64 }
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:23561/ >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+networks:
+  # No route out, and only the services that need the database are on it.
+  db:
+    internal: true
+  egress: {}
+  # Must stay non-internal: Docker does not publish ports from internal-only
+  # networks (verified on Docker 29), and the frontend's port lives here.
+  web: {}
 
 volumes:
   pgdata:

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { bearerToken, pickLatestBackup, secretEquals } from "./backup";
+import { MIN_BACKUP_TOKEN_LENGTH, bearerToken, pickLatestBackup, secretEquals, usableBackupToken } from "./backup";
 
 describe("pickLatestBackup", () => {
   it("returns the newest archive by date in the filename", () => {
@@ -60,5 +60,31 @@ describe("secretEquals", () => {
     expect(secretEquals("short", "a-much-longer-secret")).toBe(false);
     expect(secretEquals("", "nonempty")).toBe(false);
     expect(secretEquals("", "")).toBe(true);
+  });
+});
+
+describe("usableBackupToken", () => {
+  it("keeps the route off when no token is configured", () => {
+    expect(usableBackupToken(undefined)).toEqual({ token: "" });
+    expect(usableBackupToken("")).toEqual({ token: "" });
+    expect(usableBackupToken("   ")).toEqual({ token: "" });
+  });
+
+  it("fails closed on a short token instead of guarding the dump with it", () => {
+    const short = usableBackupToken("x".repeat(MIN_BACKUP_TOKEN_LENGTH - 1));
+    expect(short.token).toBe("");
+    expect(short.reason).toContain("shorter than");
+  });
+
+  it("fails closed on the .env.example placeholder", () => {
+    const placeholder = usableBackupToken("replace-me-with-a-long-random-string");
+    expect(placeholder.token).toBe("");
+    expect(placeholder.reason).toContain("placeholder");
+  });
+
+  it("accepts a long random token, trimmed", () => {
+    const strong = "a1".repeat(32);
+    expect(usableBackupToken(strong)).toEqual({ token: strong });
+    expect(usableBackupToken(` ${strong}\n`)).toEqual({ token: strong });
   });
 });

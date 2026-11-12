@@ -22,6 +22,12 @@ concurrency:
 env:
   IMAGE: ghcr.io/${{ github.repository_owner }}/token-tracker-backup
   KEEP_VERSIONS: "3"
+  # docker-compose.yml has no fallback credentials any more (it fails closed
+  # without them), so the throwaway CI database gets its own. The steps below
+  # address it as tokens/tokens.
+  POSTGRES_USER: tokens
+  POSTGRES_PASSWORD: ci-throwaway-${{ github.run_id }}-${{ github.run_attempt }}
+  POSTGRES_DB: tokens
 
 jobs:
   verify-and-store:

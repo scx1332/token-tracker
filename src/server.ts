@@ -5,9 +5,9 @@ import { ACCELERATORS } from "./accelerators";
 import { buildRateByPermaslug } from "./market";
 import { fetchJson } from "./scraper";
 import { parseEndpointStats } from "./usage";
-import { bearerToken, pickLatestBackup, secretEquals } from "./backup";
+import { bearerToken, pickLatestBackup, secretEquals, usableBackupToken } from "./backup";
 import { evaluateChecks, overallStatus, type BackupFact, type MonitorFacts } from "./monitor";
-import { readdir, stat } from "node:fs/promises";
+import { lstat, readdir, stat } from "node:fs/promises";
 import { createHash } from "node:crypto";
 
 export interface ServerOptions {
@@ -57,8 +57,12 @@ const VOLUME_CACHE_MS = 10 * 60_000;
 // Where `scripts/backup-db.sh` drops archives, mounted read-only into this
 // container. The endpoint that serves them stays off — 404, as if it were never
 // routed — unless BACKUP_TOKEN is set, so it exists only where it is wanted.
+// A token that is set but weak (short, or the .env.example placeholder) keeps
+// the route off too: fail closed rather than guard the whole dump with it.
 const BACKUP_DIR = process.env.BACKUP_DIR ?? "/backups";
-const BACKUP_TOKEN = process.env.BACKUP_TOKEN ?? "";
+const backupTokenCheck = usableBackupToken(process.env.BACKUP_TOKEN);
+if (backupTokenCheck.reason) console.warn(`/backup/latest disabled: ${backupTokenCheck.reason}`);
+const BACKUP_TOKEN = backupTokenCheck.token;
 
 export function createServer(storage: Storage, options: ServerOptions) {
   const build = readBuildInfo();
@@ -152,7 +156,14 @@ export function createServer(storage: Storage, options: ServerOptions) {
     const name = pickLatestBackup(names);
     if (!name) return json({ error: "No backup archive yet" }, 503);
 
-    const file = Bun.file(`${BACKUP_DIR}/${name}`);
+    // The name is pinned by a strict regex, so it cannot traverse; but the entry
+    // itself could be a symlink planted in the backups dir pointing anywhere in
+    // this container (/proc/self/environ holds the DB password). Regular files only.
+    const path = `${BACKUP_DIR}/${name}`;
+    const info = await lstat(path).catch(() => null);
+    if (!info?.isFile()) return json({ error: "Newest backup is not a regular file" }, 503);
+
+    const file = Bun.file(path);
     const bytes = Buffer.from(await file.arrayBuffer());
     // The caller re-checks this after download, so a truncated transfer is
     // caught before anything downstream trusts the archive.

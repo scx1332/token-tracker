@@ -1,7 +1,10 @@
-node_modules
-dist
-.git
-.gitignore
-.env
-.env.local
-.env.*.local
+# Allowlist (see the root .dockerignore): only what the build stage reads.
+*
+!package.json
+!package-lock.json
+!tsconfig.json
+!vite.config.ts
+!index.html
+!server.js
+!src
+src/**/*.test.ts

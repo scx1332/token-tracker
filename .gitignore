@@ -6,3 +6,11 @@ frontend/dist/
 frontend/tsconfig.tsbuildinfo
 *.log
 scratch/
+# Secrets and data that must never be committed: any .env variant (backups,
+# handover copies) except the template, and database dumps / archives.
+.env.*
+!.env.example
+*.sql.7z
+/tokens-*.sql
+*.dump
+backups/

@@ -179,3 +179,8 @@ docker compose up -d --build                    # full stack (or ./deploy.sh)
   `command:`). `frontend/Dockerfile` builds the static UI + `server.js`.
 - All host ports bind to `127.0.0.1` (`BACKEND_PORT` 28470, `FRONTEND_PORT` 28471);
   Postgres is internal only. Required env lives in `.env.example`.
+- Hardened: no fallback DB credentials (compose fails closed), non-root users
+  (postgres 70, app 10001 — not 1000, which is `ubuntu` on the host),
+  `read_only` + tmpfs, `cap_drop: [ALL]`, `no-new-privileges`, digest-pinned
+  images, resource limits, log rotation, and an `internal` `db` network the
+  frontend is not on. Keep it that way; reasons in `docs/SECURITY-HARDENING.md`.
