@@ -263,3 +263,35 @@ describe("breakdownAt", () => {
     expect(breakdownAt({ key: "k", label: "k", grouped: true, values: [0], members: [] }, 0, fmt)).toEqual([]);
   });
 });
+
+it("groups October successors and batch traffic while keeping distinct lines apart", () => {
+  for (const id of ["moonshotai/kimi-k3", "moonshotai/kimi-k3:batch", "moonshotai/kimi-k3.1-pro"]) {
+    expect(familyOf(id).key).toBe("kimi-k3");
+  }
+  for (const id of ["google/gemini-4-argon", "google/gemini-4-argon:batch"]) {
+    expect(familyOf(id).key).toBe("gemini-argon");
+  }
+  for (const id of ["moonshotai/kimi-k2.5", "moonshotai/kimi-k3-flash", "minimax/minimax-m3.1-flash", "meta/muse-wonder"]) {
+    expect(familyOf(id).key).toBe(id);
+  }
+  const rows = groupByFamily([
+    { modelId: "google/gemini-4-argon", tokens: 20, spendUsd: 4 },
+    { modelId: "google/gemini-4-argon:batch", tokens: 10, spendUsd: 1 },
+  ]);
+  expect(rows).toHaveLength(1);
+  expect(rows[0]!.tokens).toBe(30);
+  expect(rows[0]!.spendUsd).toBe(5);
+});
+
+it("keeps newly trained specialists and video models out of general text families", () => {
+  expect(familyOf("z-ai/glm-5.3-flashx-legal").key).toBe("glm-flashx-legal");
+  expect(familyOf("z-ai/glm-5.3-flashx").key).toBe("glm-flash");
+  expect(familyOf("z-ai/glm-5.3-prime").key).toBe("glm-5");
+  for (const id of ["google/gemini-omni-1.1-flash", "google/gemini-omni-1.2-flash", "particle-ai/particle-1"]) {
+    expect(familyOf(id).key).toBe(id);
+  }
+  for (const id of ["tencent/hy4", "tencent/hy4-preview"]) expect(familyOf(id).key).toBe("hy4");
+  for (const suffix of ["", "-pro", ":batch", "-pro:batch"]) {
+    expect(familyOf(`openai/gpt-6.1-terra${suffix}`).key).toBe("gpt-terra");
+  }
+});

@@ -28,6 +28,27 @@ describe("originOf", () => {
 });
 
 describe("classOf", () => {
+  it("places October launches without mistaking Gemini for a mini model", () => {
+    for (const suffix of ["", ":batch"]) {
+      expect(classOf(`google/gemini-4-argon${suffix}`)).toBe("Top");
+      expect(classOf(`anthropic/claude-haiku-5.5${suffix}`)).toBe("Luna");
+      expect(classOf(`anthropic/claude-sonnet-5.5${suffix}`)).toBe("Terra");
+    }
+    expect(classOf("moonshotai/kimi-k3.1-pro")).toBe("Sol");
+    expect(classOf("meta/muse-wonder")).toBe("Sol");
+    expect(classOf("stepfun/step-5-preview")).toBe("Sol");
+    expect(classOf("minimax/minimax-m3.1-flash")).toBe("Luna");
+    expect(classOf("minimax/minimax-m3")).toBe("Terra");
+    expect(classOf("meta/muse-spark-open")).toBe("Terra");
+    expect(classOf("deepseek/deepseek-v4.1-flash-1017")).toBe("Luna");
+    expect(classOf("mistralai/mistral-large-4-0")).toBe("Sol");
+    expect(classOf("recursive/flint-v1.0:free")).toBe("Luna");
+    expect(classOf("moondream/moondream3-preview")).toBe("Luna");
+    expect(classOf("moondream/moondream3.1-9b-a2b")).toBe("Luna");
+    expect(classOf("google/gemini-unknown")).toBe("Terra");
+    expect(classOf("acme/model-mini4")).toBe("Luna");
+  });
+
   it("places September launches and their serving variants in the existing tiers", () => {
     for (const suffix of ["", ":batch", "-pro", "-pro:batch"]) {
       expect(classOf(`openai/gpt-6-sol${suffix}`)).toBe("Sol");
@@ -167,4 +188,28 @@ describe("board groupings", () => {
     expect(groupingByKey("nope").key).toBe("family");
     expect(GROUPINGS.map((g) => g.key)).toEqual(["family", "lab", "origin", "class"]);
   });
+});
+
+it("attributes October labs to their verified origins", () => {
+  for (const [id, label, origin] of [
+    ["recursive/flint-v1.0:free", "Recursive", "USA"],
+    ["elorian/glimpse", "Elorian", "USA"],
+    ["reflection/beam-1.0-501b-a23b", "Reflection", "USA"],
+    ["moondream/moondream3-preview", "Moondream", "USA"],
+    ["liquid/lfm-2.5-24b-a2b", "Liquid AI", "USA"],
+    ["xingchen-agi/xing4.0-29b-a4b:free", "XingChen", "China"],
+  ]) {
+    expect(labOf(id!).label).toBe(label!);
+    expect(originOf(id!).label).toBe(origin!);
+  }
+});
+
+it("places November compact coding releases while preserving named GPT tiers", () => {
+  expect(classOf("stealth/crouton-alpha")).toBe("Luna");
+  expect(classOf("particle-ai/particle-1")).toBe("Luna");
+  expect(labOf("particle-ai/particle-1").label).toBe("Particle AI");
+  for (const suffix of ["", "-pro", ":batch", "-pro:batch"]) {
+    expect(classOf(`openai/gpt-6.1-terra${suffix}`)).toBe("Terra");
+  }
+  expect(classOf("google/gemini-4-argon")).toBe("Top");
 });

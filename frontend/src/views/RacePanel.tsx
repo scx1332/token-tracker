@@ -8,15 +8,8 @@ import { shortDate } from "../format";
 export const RACE_SINCE = "2026-06-15";
 // How many days of daily bars fit on the row before they stop being bars.
 const BAR_DAYS = 28;
-// Keep recent launches visible while their window totals catch up, alongside
-// the GPT-5.6 tiers already tracked separately in the race.
-export const RACE_PINS = [
-  "openai/gpt-6-astra", "openai/gpt-6-astra-pro",
-  "openai/gpt-6-sol", "openai/gpt-6-sol-pro",
-  "openai/gpt-6-luna", "openai/gpt-6-luna-pro",
-  "anthropic/claude-opus-5.5", "x-ai/grok-4.7",
-  "openai/gpt-5.6-luna", "openai/gpt-5.6-terra", "openai/gpt-5.5", "x-ai/grok-4.6",
-];
+import { RACE_PINS } from "../racePins";
+export { RACE_PINS } from "../racePins";
 
 /**
  * The model race, complete with its controls and its own lazy data fetching —

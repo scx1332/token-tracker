@@ -3,6 +3,7 @@ import { createIsolatedStorage, hasPostgresForTests, closeTestPools } from "./te
 import { createServer } from "./server";
 import { normalizePricing } from "./pricing";
 import type { Storage } from "./storage";
+import { RACE_PINS } from "../frontend/src/racePins";
 
 const it = hasPostgresForTests() ? test : test.skip;
 
@@ -47,6 +48,30 @@ async function seed(storage: Storage) {
   });
   await storage.setState("weekly_chart", JSON.stringify({ points: [{ date: "2026-08-01", tokensByPermaslug: { "z-ai/glm-5.2-x": 5 } }] }));
 }
+
+test("race API preserves the full curated launch field and bounds arbitrary pins", async () => {
+  let received: string[] = [];
+  const storage = {
+    getModelRace: async (options: { pin?: string[] }) => {
+      received = options.pin ?? [];
+      return [];
+    },
+  } as unknown as Storage;
+  const server = createServer(storage, { port: 0, hostname: "127.0.0.1" });
+  try {
+    const query = new URLSearchParams({ bucket: "day", pin: RACE_PINS.join(",") });
+    const response = await server.fetch(new Request(`http://localhost/market/race?${query}`));
+    expect(response.status).toBe(200);
+    expect(received).toEqual(RACE_PINS);
+    query.set("pin", ["invalid", ...Array.from({ length: 60 }, (_, i) => `lab/model-${i}`)].join(","));
+    await server.fetch(new Request(`http://localhost/market/race?${query}`));
+    expect(received).toHaveLength(50);
+    expect(received[0]).toBe("lab/model-0");
+    expect(received[49]).toBe("lab/model-49");
+  } finally {
+    server.stop(true);
+  }
+});
 
 describe("HTTP server (integration)", () => {
   it("serves the full API surface", async () => {

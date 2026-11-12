@@ -283,7 +283,7 @@ export function createServer(storage: Storage, options: ServerOptions) {
       .split(",")
       .map((m) => m.trim())
       .filter((m) => /^[\w.:-]+\/[\w.:-]+$/.test(m))
-      .slice(0, 12);
+      .slice(0, 50);
     const points = await storage.getModelRace({
       since: raceSince(days),
       bucket,

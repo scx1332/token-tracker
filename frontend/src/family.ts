@@ -25,7 +25,9 @@ const RULES: { test: RegExp; key: string; label: string }[] = [
   { test: /^anthropic\/claude-sonnet/, key: "claude-sonnet", label: "Claude Sonnet" },
   { test: /^anthropic\/claude-fable/, key: "claude-fable", label: "Claude Fable" },
   { test: /^anthropic\/claude-haiku/, key: "claude-haiku", label: "Claude Haiku" },
-  // Z.ai: every Flash cut is one product line (this rule runs first, so the
+  // Legal is separately trained; match it before both general GLM rules.
+  { test: /^z-ai\/glm-5\.3-flashx-legal(?:$|[-:])/, key: "glm-flashx-legal", label: "GLM FlashX Legal" },
+  // Z.ai: every general-purpose Flash cut is one product line (this rule runs first, so the
   // GLM 5 rule below never claims one); the chat models of the 5.x generation
   // from 5.2 on (5.2, 5.3, 5.3 Prime and whatever point release ships next)
   // are the other; 5.1 and earlier stay their own rows.
@@ -48,8 +50,14 @@ const RULES: { test: RegExp; key: string; label: string }[] = [
   { test: /^xiaomi\/mimo-v2\.6-pro(?:$|[-:])/, key: "mimo-v2.6-pro", label: "MiMo V2.6 Pro" },
   // Qwen 3.8 Max and its refresh.
   { test: /^qwen\/qwen3\.8-max/, key: "qwen3.8-max", label: "Qwen3.8 Max" },
-  // Every Google Flash tier — Flash and Flash Lite, all generations.
-  { test: /^google\/gemini-.*flash/, key: "gemini-flash", label: "Gemini Flash" },
+  // K3.1 Pro is a post-trained successor to K3, in the same flagship line.
+  { test: /^moonshotai\/kimi-k3(?:\.\d+)?(?:-pro)?(?:$|:|-[0-9])/, key: "kimi-k3", label: "Kimi K3" },
+  // Argon is a separate reasoning line; keep its batch traffic in the same row.
+  { test: /^google\/gemini-4-argon(?:$|[-:])/, key: "gemini-argon", label: "Gemini Argon" },
+  // Hy4 Preview and the final release are the same product line.
+  { test: /^tencent\/hy4(?:-preview)?(?:$|:)/, key: "hy4", label: "Hy4" },
+  // Text Flash tiers only: Omni Flash generates video, a separate product.
+  { test: /^google\/gemini-(?!omni-).*flash/, key: "gemini-flash", label: "Gemini Flash" },
 ];
 
 /** The family a model slug is counted under — itself, when no rule matches. */

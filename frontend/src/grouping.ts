@@ -49,6 +49,8 @@ const LAB_LABELS: Record<string, string> = {
   moonshotai: "Moonshot",
   tencent: "Tencent",
   minimax: "MiniMax",
+  "particle-ai": "Particle AI",
+  ricursiveai: "ricursiveAI",
   xiaomi: "Xiaomi",
   stepfun: "StepFun",
   baidu: "Baidu",
@@ -58,6 +60,15 @@ const LAB_LABELS: Record<string, string> = {
   "thinkingmachines": "Thinking Machines",
   "nousresearch": "Nous",
   inception: "Inception",
+  recursive: "Recursive",
+  elorian: "Elorian",
+  reflection: "Reflection",
+  moondream: "Moondream",
+  liquid: "Liquid AI",
+  "xingchen-agi": "XingChen",
+  inclusionai: "inclusionAI",
+  unbiased: "Unbiased",
+  scaledown: "ScaleDown",
   "ai21": "AI21",
   "aion-labs": "Aion",
 };
@@ -88,6 +99,11 @@ const ORIGIN_OF_AUTHOR: Record<string, string> = {
   nvidia: "USA",
   perplexity: "USA",
   inception: "USA",
+  recursive: "USA",
+  elorian: "USA",
+  reflection: "USA",
+  moondream: "USA",
+  liquid: "USA",
   nousresearch: "USA",
   thinkingmachines: "USA",
   morph: "USA",
@@ -115,6 +131,7 @@ const ORIGIN_OF_AUTHOR: Record<string, string> = {
   bytedance: "China",
   "bytedance-seed": "China",
   inclusionai: "China",
+  "xingchen-agi": "China",
   kwaipilot: "China",
   meituan: "China",
   "nex-agi": "China",
@@ -163,6 +180,7 @@ const CLASS_RULES: { test: RegExp; cls: ModelClass }[] = [
   { test: /^openai\/gpt-oss/, cls: "Luna" },
   { test: /^openai\/gpt-(4|5)/, cls: "Sol" },
   // Google
+  { test: /^google\/gemini-4-argon(?:$|[-:])/, cls: "Top" },
   { test: /^google\/gemini-.*flash-lite/, cls: "Luna" },
   { test: /^google\/gemini-.*flash/, cls: "Terra" },
   { test: /^google\/gemini-.*pro/, cls: "Sol" },
@@ -183,11 +201,19 @@ const CLASS_RULES: { test: RegExp; cls: ModelClass }[] = [
   { test: /^qwen\//, cls: "Terra" },
   { test: /^tencent\/hy4/, cls: "Terra" },
   { test: /^tencent\//, cls: "Luna" },
+  { test: /^minimax\/minimax-.*flash/, cls: "Luna" },
   { test: /^minimax\//, cls: "Terra" },
   { test: /^xiaomi\/mimo-.*-pro/, cls: "Terra" },
   { test: /^xiaomi\//, cls: "Luna" },
   { test: /^stepfun\/.*flash/, cls: "Luna" },
+  { test: /^stepfun\/step-5(?:$|[-:])/, cls: "Sol" },
+  // Compact coding and vision specialists.
+  { test: /^stealth\/crouton-alpha(?:$|[-:])/, cls: "Luna" },
+  { test: /^particle-ai\/particle-1(?:$|[-:])/, cls: "Luna" },
+  { test: /^recursive\/flint(?:$|[-:])/, cls: "Luna" },
+  { test: /^moondream\/moondream3(?:\.\d+)?(?:$|[-:])/, cls: "Luna" },
   // Others
+  { test: /^meta\/muse-wonder(?:$|[-:])/, cls: "Sol" },
   { test: /^meta\/muse-spark-.*contributor/, cls: "Luna" },
   { test: /^meta\/muse-spark/, cls: "Terra" },
   { test: /^nvidia\/.*ultra/, cls: "Sol" },
@@ -201,7 +227,7 @@ export function classOf(modelId: string): ModelClass {
   for (const rule of CLASS_RULES) if (rule.test.test(id)) return rule.cls;
   // Slug heuristics for the long tail.
   const slug = id.split("/").pop() ?? id;
-  if (/(mini|nano|lite|flash|small|tiny|-\d{1,2}b\b)/.test(slug)) return "Luna";
+  if (/(?:^|[-:])(?:mini|nano|lite|flash|small|tiny)(?:$|[-:\d])|-\d{1,2}b\b/.test(slug)) return "Luna";
   if (/(pro|max|ultra|large|opus)/.test(slug)) return "Sol";
   return "Terra";
 }
