@@ -202,7 +202,6 @@ Two gaps, now closed:
 6. **CI supply chain.**
    - Pin `actions/checkout`, `oven-sh/setup-bun` and the rest to commit SHAs.
    - `production-check.yml` uses `bun-version: latest`; pin it.
-   - Delete `tmp-prune-probe.yml`, whose own header says it was temporary.
    - Confirm the GHCR `token-tracker-backup` package is private.
 7. **Frontend dependencies.** `npm audit` reports:
    - 2 critical: maplibre-gl XSS via `plotly.js`. Low practical risk: the app
